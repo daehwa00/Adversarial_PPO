@@ -44,11 +44,11 @@ class Env:
         # 수정된 이미지를 모델과 동일한 장치로 이동
         modified_image = modified_image.to(self.device)
         new_prediction = self.classifier(modified_image)
-        new_prediction = torch.softmax(new_prediction, dim=1)
 
         reward = self.calculate_reward(new_prediction)
+        argmax_new_prediction = torch.argmax(new_prediction, dim=1)
 
-        done = self.original_class != torch.argmax(new_prediction, dim=1)
+        done = self.original_class != argmax_new_prediction
         done = done.float()
 
         self.current_state = modified_image
@@ -87,10 +87,11 @@ class Env:
 
     def calculate_reward(self, classifier_results):
         with torch.no_grad():
+            classifier_results = torch.softmax(classifier_results, dim=1)
             batch_indices = torch.arange(classifier_results.size(0)).to(self.device)
             selected_probs = classifier_results[batch_indices, self.original_class]
             safe_values = torch.clamp(1 - selected_probs, min=1e-8, max=1.0 - 1e-5)
-            reward = torch.log(safe_values).cpu()
+            reward = torch.log10(safe_values).cpu()
 
         return reward
 

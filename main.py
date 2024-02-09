@@ -10,7 +10,7 @@ ENV_NAME = "AdversarialRL"
 
 
 n_iterations = 50000
-lr = 1e-5
+lr = 0.001
 epochs = 10
 clip_range = 0.2
 mini_batch_size = 256

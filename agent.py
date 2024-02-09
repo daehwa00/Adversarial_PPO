@@ -20,8 +20,8 @@ class Agent:
         )
         self.critic = Critic(n_states=self.n_states).to(self.device)
 
-        self.actor_optimizer = Adam(self.actor.parameters(), lr=self.lr, eps=1e-5)
-        self.critic_optimizer = Adam(self.critic.parameters(), lr=5e-5, eps=1e-5)
+        self.actor_optimizer = Adam(self.actor.parameters(), eps=1e-5)
+        self.critic_optimizer = Adam(self.critic.parameters(), eps=1e-5)
 
         self.critic_loss = torch.nn.MSELoss()
 

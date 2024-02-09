@@ -94,22 +94,17 @@ class Train:
                 hidden_states_actor,
                 hidden_states_critic,
             ):
-                h_a = hidden_state_actor[:, 0, :].detach().unsqueeze(0).contiguous()
-                c_a = hidden_state_actor[:, 1, :].detach().unsqueeze(0).contiguous()
-                h_c = hidden_state_critic[:, 0, :].detach().unsqueeze(0).contiguous()
-                c_c = hidden_state_critic[:, 1, :].detach().unsqueeze(0).contiguous()
+                h_a = hidden_state_actor[:, 0, :].unsqueeze(0).contiguous()
+                c_a = hidden_state_actor[:, 1, :].unsqueeze(0).contiguous()
+                h_c = hidden_state_critic[:, 0, :].unsqueeze(0).contiguous()
+                c_c = hidden_state_critic[:, 1, :].unsqueeze(0).contiguous()
                 hidden_state_actor = (h_a, c_a)
                 hidden_state_critic = (h_c, c_c)
 
                 # 업데이트된 숨겨진 상태를 사용하여 critic 및 actor 업데이트
                 value, _ = self.agent.critic_forward(state, hidden_state_critic)
-                # clipped_value = old_value + torch.clamp(
-                #     value - old_value, -self.epsilon, self.epsilon
-                # )
-                # clipped_v_loss = (clipped_value - return_).pow(2)
-                # un_clipped_v_loss = (value - return_).pow(2)
-                # critic_loss = 0.5 * torch.max(clipped_v_loss, un_clipped_v_loss).mean()
-                critic_loss = 0.5 * (value - return_).pow(2).mean()
+
+                critic_loss = (value - adv).pow(2).mean()
 
                 new_dist, _ = self.agent.actor_forward(state, hidden_state_actor)
                 new_log_prob = new_dist.log_prob(action).sum(dim=1)
@@ -293,6 +288,11 @@ class Train:
         for env_idx in range(num_envs):
             gae = 0
             for t in reversed(range(done_times[env_idx])):
+                # print(f"done:", dones[env_idx, t])
+                # print(f"reward:", rewards[env_idx, t])
+                # print(f"value:", values[env_idx, t])
+                # print(f"next_value:", values[env_idx, t + 1])
+                # print(f"t:", t)
                 delta = (
                     rewards[env_idx, t]
                     + gamma * values[env_idx, t + 1] * (1 - dones[env_idx, t])
