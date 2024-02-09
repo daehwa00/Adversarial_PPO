@@ -111,6 +111,7 @@ class Train:
                 ratio = (new_log_prob - old_log_prob).exp()
 
                 actor_loss = self.compute_actor_loss(ratio, adv)
+
                 self.agent.optimize(actor_loss, critic_loss)
 
         return actor_loss, critic_loss

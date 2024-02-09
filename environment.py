@@ -11,7 +11,7 @@ class Env:
         time_horizon=10,
         alpha=1.0,  # 점진적 보상 가중치
         beta=20.0,  # 최종 보상 가중치
-        gamma=0.01,  # 효율성 보상 가중치
+        gamma=1.0,  # 효율성 보상 가중치
     ):
         self.classifier = classifier
         self.original_loader = filtered_loader
@@ -96,11 +96,15 @@ class Env:
             batch_indices = torch.arange(new_prediction.size(0)).to(self.device)
             new_probs = new_prediction[batch_indices, self.original_class]
             prev_probs = self.previous_prediction[batch_indices, self.original_class]
-            reward = self.alpha * (new_probs - prev_probs).cpu()
-            reward = torch.where(reward > 0, reward, torch.zeros_like(reward))
+            progressive_reward = self.alpha * (new_probs - prev_probs).cpu()
+            progressive_reward = torch.where(
+                progressive_reward > 0,
+                progressive_reward,
+                torch.zeros_like(progressive_reward),
+            )
 
             efficiency_reward = -self.gamma * self.actions_taken
-            reward += efficiency_reward
+            reward = progressive_reward + efficiency_reward
 
         return reward.cpu()
 
@@ -110,8 +114,8 @@ def make_env(
     filtered_loader,
     latent_vector_size=512,
     alpha=1.0,
-    beta=50.0,
-    gamma=0.01,
+    beta=20.0,
+    gamma=1.0,
 ):
     return Env(
         classifier,

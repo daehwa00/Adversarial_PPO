@@ -10,7 +10,7 @@ ENV_NAME = "AdversarialRL"
 
 
 n_iterations = 50000
-lr = 0.0003
+lr = 0.0005
 epochs = 10
 clip_range = 0.2
 mini_batch_size = 256
@@ -21,7 +21,7 @@ env_batch = 512
 
 alpha = 1.0
 beta = 20.0
-gamma = 0.5
+gamma = 0.1
 
 if __name__ == "__main__":
     set_random_seed(2024, deterministic=True)
@@ -36,6 +36,7 @@ if __name__ == "__main__":
         latent_vector_size=latent_size,
         alpha=alpha,
         beta=beta,
+        gamma=gamma,
     )
 
     agent = EncodedAgent(
