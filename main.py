@@ -10,15 +10,18 @@ ENV_NAME = "AdversarialRL"
 
 
 n_iterations = 50000
-lr = 0.001
+lr = 0.0003
 epochs = 10
 clip_range = 0.2
 mini_batch_size = 256
-T = 128
+T = 64
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 latent_size = 512
 env_batch = 512
 
+alpha = 1.0
+beta = 20.0
+gamma = 0.5
 
 if __name__ == "__main__":
     set_random_seed(2024, deterministic=True)
@@ -31,6 +34,8 @@ if __name__ == "__main__":
         classifier=pre_trained_classifier,
         filtered_loader=filtered_loader,
         latent_vector_size=latent_size,
+        alpha=alpha,
+        beta=beta,
     )
 
     agent = EncodedAgent(

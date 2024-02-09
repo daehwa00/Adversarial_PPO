@@ -104,7 +104,7 @@ class Train:
                 # 업데이트된 숨겨진 상태를 사용하여 critic 및 actor 업데이트
                 value, _ = self.agent.critic_forward(state, hidden_state_critic)
 
-                critic_loss = (value - adv).pow(2).mean()
+                critic_loss = 0.1 * (return_ - value).pow(2).mean()
 
                 new_dist, _ = self.agent.actor_forward(state, hidden_state_actor)
                 new_log_prob = new_dist.log_prob(action).sum(dim=1)
@@ -269,7 +269,8 @@ class Train:
             )
 
     # lambda가 작으면 TD(λ)의 편향이 커지고, 크면 MC에 가까워짐
-    def get_gae(self, rewards, values, dones, done_times, gamma=0.99, lam=0.95):
+    # GAE의 장점은 λ를 통해 편향-분산 트레이드오프를 조절할 수 있다는 것
+    def get_gae(self, rewards, values, dones, done_times, gamma=1, lam=0.95):
         assert (
             rewards.ndim == 2 and values.ndim == 2 and dones.ndim == 2
         ), "Inputs must be 2D arrays."
@@ -288,11 +289,6 @@ class Train:
         for env_idx in range(num_envs):
             gae = 0
             for t in reversed(range(done_times[env_idx])):
-                # print(f"done:", dones[env_idx, t])
-                # print(f"reward:", rewards[env_idx, t])
-                # print(f"value:", values[env_idx, t])
-                # print(f"next_value:", values[env_idx, t + 1])
-                # print(f"t:", t)
                 delta = (
                     rewards[env_idx, t]
                     + gamma * values[env_idx, t + 1] * (1 - dones[env_idx, t])
@@ -305,8 +301,7 @@ class Train:
     def compute_actor_loss(self, ratio, adv):
         pg_loss1 = adv * ratio
         pg_loss2 = adv * torch.clamp(ratio, 1 - self.epsilon, 1 + self.epsilon)
-        loss = torch.min(pg_loss1, pg_loss2).mean()
-        loss = -loss
+        loss = -torch.min(pg_loss1, pg_loss2).mean()
 
         return loss
 

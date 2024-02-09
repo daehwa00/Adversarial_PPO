@@ -9,6 +9,9 @@ class Env:
         filtered_loader,
         latent_vector_size,
         time_horizon=10,
+        alpha=1.0,  # 점진적 보상 가중치
+        beta=20.0,  # 최종 보상 가중치
+        gamma=0.01,  # 효율성 보상 가중치
     ):
         self.classifier = classifier
         self.original_loader = filtered_loader
@@ -18,6 +21,10 @@ class Env:
         self.action_space = 5  # R, G, B, X, Y
         self.env_batch = filtered_loader.batch_size
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
+        self.actions_taken = 0
 
     def reset(self):
         while True:
@@ -34,11 +41,13 @@ class Env:
         self.original_prediction = torch.softmax(
             self.classifier(self.current_state), dim=1
         )
+        self.previous_prediction = self.original_prediction
         self.original_class = torch.argmax(self.original_prediction, dim=1)
-
+        self.actions_taken = 0
         return self.current_state
 
     def step(self, actions):
+        self.actions_taken += 1
         modified_image = self.apply_actions(self.current_state, actions)
 
         # 수정된 이미지를 모델과 동일한 장치로 이동
@@ -48,14 +57,13 @@ class Env:
         reward = self.calculate_reward(new_prediction)
         argmax_new_prediction = torch.argmax(new_prediction, dim=1)
 
-        done = self.original_class != argmax_new_prediction
-        done = done.float()
+        done = (self.original_class != argmax_new_prediction).float()
+
+        # done이면 추가 보상 50을 줌
+        reward += done.cpu() * self.beta
 
         self.current_state = modified_image
-
-        # show modified image
-        # plt.imshow(modified_image[0].cpu().numpy().transpose(1, 2, 0))
-        # plt.show()
+        self.previous_prediction = new_prediction
 
         return modified_image, reward, done, {}
 
@@ -72,11 +80,8 @@ class Env:
             actions[:, 3],
             actions[:, 4],
         )
-        # X 를 int로 변환
         X = X.astype(int)
-        # Y 를 int로 변환
         Y = Y.astype(int)
-        # 각 이미지에 대해 RGB 값을 적용
         batch_indices = np.arange(images.shape[0])
         images[batch_indices, :, Y, X] = np.stack([R, G, B], axis=-1)
 
@@ -85,16 +90,34 @@ class Env:
 
         return modified_images
 
-    def calculate_reward(self, classifier_results):
+    def calculate_reward(self, new_prediction):
         with torch.no_grad():
-            classifier_results = torch.softmax(classifier_results, dim=1)
-            batch_indices = torch.arange(classifier_results.size(0)).to(self.device)
-            selected_probs = classifier_results[batch_indices, self.original_class]
-            safe_values = torch.clamp(1 - selected_probs, min=1e-8, max=1.0 - 1e-5)
-            reward = torch.log10(safe_values).cpu()
+            new_prediction = torch.softmax(new_prediction, dim=1)
+            batch_indices = torch.arange(new_prediction.size(0)).to(self.device)
+            new_probs = new_prediction[batch_indices, self.original_class]
+            prev_probs = self.previous_prediction[batch_indices, self.original_class]
+            reward = self.alpha * (new_probs - prev_probs).cpu()
+            reward = torch.where(reward > 0, reward, torch.zeros_like(reward))
 
-        return reward
+            efficiency_reward = -self.gamma * self.actions_taken
+            reward += efficiency_reward
+
+        return reward.cpu()
 
 
-def make_env(classifier, filtered_loader, latent_vector_size=512):
-    return Env(classifier, filtered_loader, latent_vector_size)
+def make_env(
+    classifier,
+    filtered_loader,
+    latent_vector_size=512,
+    alpha=1.0,
+    beta=50.0,
+    gamma=0.01,
+):
+    return Env(
+        classifier,
+        filtered_loader,
+        latent_vector_size,
+        alpha=alpha,
+        beta=beta,
+        gamma=gamma,
+    )
