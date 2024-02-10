@@ -3,6 +3,10 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 
+from utils import positional_encoding
+
+from torchsummary import summary
+
 
 class Train:
     def __init__(
@@ -43,6 +47,7 @@ class Train:
         log_probs,
         hidden_states_actor,
         hidden_states_critic,
+        positional_encoded_tensor,
     ):
         full_batch_size = states.size(0)
         for _ in range(full_batch_size // mini_batch_size):
@@ -59,6 +64,7 @@ class Train:
                 log_probs[indices],
                 hidden_states_actor[indices],
                 hidden_states_critic[indices],
+                positional_encoded_tensor[indices],
             )
 
     def train(
@@ -70,6 +76,7 @@ class Train:
         log_probs,
         hidden_states_actor,
         hidden_states_critic,
+        positional_encoded_tensor,
     ):
         returns = advs + values
 
@@ -83,6 +90,7 @@ class Train:
                 old_log_prob,
                 hidden_state_actor,
                 hidden_state_critic,
+                position,
             ) in self.choose_mini_batch(
                 self.mini_batch_size,
                 states,
@@ -93,6 +101,7 @@ class Train:
                 log_probs,
                 hidden_states_actor,
                 hidden_states_critic,
+                positional_encoded_tensor,
             ):
                 h_a = hidden_state_actor[:, 0, :].unsqueeze(0).contiguous()
                 c_a = hidden_state_actor[:, 1, :].unsqueeze(0).contiguous()
@@ -101,10 +110,14 @@ class Train:
                 hidden_state_actor = (h_a, c_a)
                 hidden_state_critic = (h_c, c_c)
 
-                # 업데이트된 숨겨진 상태를 사용하여 critic 및 actor 업데이트
-                value, _ = self.agent.critic_forward(state, hidden_state_critic)
+                position = position.unsqueeze(2).unsqueeze(3)
 
-                critic_loss = 0.1 * (return_ - value).pow(2).mean()
+                # 업데이트된 숨겨진 상태를 사용하여 critic 및 actor 업데이트
+                value, _ = self.agent.critic_forward(
+                    state, position, hidden_state_critic
+                )
+
+                critic_loss = (return_ - value).pow(2).mean()
 
                 new_dist, _ = self.agent.actor_forward(state, hidden_state_actor)
                 new_log_prob = new_dist.log_prob(action).sum(dim=1)
@@ -146,13 +159,22 @@ class Train:
                 [self.env_num, self.horizon, 2, 64], requires_grad=False
             ).to(self.agent.device)
 
+            positional_encoded_vector = positional_encoding(
+                time_step=64, d_model=16
+            ).unsqueeze(0)
+            positional_encoded_tensor = positional_encoded_vector.repeat(
+                self.env_num, 1, 1
+            ).to(self.agent.device)
+
             hidden_states_actor = None
             hidden_states_critic = None
 
             self.start_time = time.time()
+            self.time_step = 0
 
             # 1 episode (데이터 수집 단계)
             for t in range(self.horizon):
+
                 # Actor
                 dist, hidden_states_actor = self.agent.choose_dists(
                     states, hidden_states_actor
@@ -162,8 +184,9 @@ class Train:
                 log_prob = dist.log_prob(actions).sum(dim=1)
 
                 # Critic
+                position = positional_encoded_tensor[:, self.time_step, :]
                 value, hidden_states_critic = self.agent.get_value(
-                    states, hidden_states_critic
+                    states, position, hidden_states_critic
                 )
                 next_states, rewards, dones, _ = self.env.step(scaled_actions)
 
@@ -190,6 +213,8 @@ class Train:
                     if dones[i] and done_times[i] == -1:
                         done_times[i] = t + 1
 
+                self.time_step += 1
+
             # done_times를 참고하여 dones_times 이후의 데이터를 필터링
             for i in range(self.env_num):
                 if done_times[i] != -1:
@@ -201,6 +226,7 @@ class Train:
                     dones_tensor[i, done_times[i] :] = 1
                     hidden_states_actor_tensor[i, done_times[i] + 1 :, :, :] = 0
                     hidden_states_critic_tensor[i, done_times[i] + 1 :, :, :] = 0
+                    positional_encoded_tensor[i, done_times[i] :] = 0
 
             remaining_steps = np.sum(
                 [self.horizon if t == -1 else t for t in done_times]
@@ -216,6 +242,7 @@ class Train:
                     c_c = hidden_states_critic_tensor[i, -1, 1, :].unsqueeze(0)
                     next_value, _ = self.agent.get_value(
                         next_states[i].unsqueeze(0),
+                        positional_encoded_tensor[i, -1, :],
                         (h_c, c_c),
                     )
                     values_tensor[i, -1] = next_value.squeeze()
@@ -252,6 +279,12 @@ class Train:
                 self.env_num,
                 remaining_steps,
             )
+            positional_encoded_tensor = self.filter_post_done_data(
+                positional_encoded_tensor,
+                done_times,
+                self.env_num,
+                remaining_steps,
+            )
 
             actor_loss, critic_loss = self.train(
                 states_tensor,
@@ -261,6 +294,7 @@ class Train:
                 log_probs_tensor,
                 hidden_states_actor_tensor,
                 hidden_states_critic_tensor,
+                positional_encoded_tensor,
             )
             eval_rewards = torch.sum(rewards_tensor, dim=1)  # 각 환경별 총 보상 계산
 

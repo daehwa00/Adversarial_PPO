@@ -19,3 +19,15 @@ def set_random_seed(seed=2021, deterministic=False):
     if deterministic:
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+
+
+def positional_encoding(time_step, d_model):
+    """Sinusoidal positional encoding for time steps"""
+    position = torch.arange(time_step, dtype=torch.float).unsqueeze(1)
+    div_term = torch.exp(
+        torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model)
+    )
+    sinusoidal_encoding = torch.zeros(time_step, d_model)
+    sinusoidal_encoding[:, 0::2] = torch.sin(position * div_term)
+    sinusoidal_encoding[:, 1::2] = torch.cos(position * div_term)
+    return sinusoidal_encoding
