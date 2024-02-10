@@ -5,8 +5,6 @@ import matplotlib.pyplot as plt
 
 from utils import positional_encoding
 
-from torchsummary import summary
-
 
 class Train:
     def __init__(
@@ -134,37 +132,14 @@ class Train:
         for iteration in range(1, 1 + self.n_iterations):
             done_times = [-1] * self.env_num
             states = self.env.reset()  # 환경 초기화
-            states_tensor = torch.zeros(
-                [self.env_num, self.horizon, *states.shape[1:]], requires_grad=False
-            ).to(self.agent.device)
-            actions_tensor = torch.zeros(
-                [self.env_num, self.horizon, 5], requires_grad=False
-            ).to(self.agent.device)
-            rewards_tensor = torch.zeros(
-                [self.env_num, self.horizon], requires_grad=False
-            ).to(self.agent.device)
-            values_tensor = torch.zeros(
-                [self.env_num, self.horizon + 1], requires_grad=False
-            ).to(self.agent.device)
-            log_probs_tensor = torch.zeros(
-                [self.env_num, self.horizon], requires_grad=False
-            ).to(self.agent.device)
-            dones_tensor = torch.zeros(
-                [self.env_num, self.horizon + 1], requires_grad=False
-            ).to(self.agent.device)
-            hidden_states_actor_tensor = torch.zeros(
-                [self.env_num, self.horizon, 2, 64], requires_grad=False
-            ).to(self.agent.device)
-            hidden_states_critic_tensor = torch.zeros(
-                [self.env_num, self.horizon, 2, 64], requires_grad=False
-            ).to(self.agent.device)
-
-            positional_encoded_vector = positional_encoding(
-                time_step=64, d_model=16
-            ).unsqueeze(0)
-            positional_encoded_tensor = positional_encoded_vector.repeat(
-                self.env_num, 1, 1
-            ).to(self.agent.device)
+            tensor_manager = TensorManager(
+                self.env_num,
+                self.horizon,
+                states.shape[1:],
+                self.env.action_space,
+                self.env.state_space,  # encoded state space
+                self.agent.device,
+            )
 
             hidden_states_actor = None
             hidden_states_critic = None
@@ -174,7 +149,6 @@ class Train:
 
             # 1 episode (데이터 수집 단계)
             for t in range(self.horizon):
-
                 # Actor
                 dist, hidden_states_actor = self.agent.choose_dists(
                     states, hidden_states_actor
@@ -184,30 +158,25 @@ class Train:
                 log_prob = dist.log_prob(actions).sum(dim=1)
 
                 # Critic
-                position = positional_encoded_tensor[:, self.time_step, :]
+                position = tensor_manager.positional_encoded_tensor[
+                    :, self.time_step, :
+                ]
                 value, hidden_states_critic = self.agent.get_value(
                     states, position, hidden_states_critic
                 )
                 next_states, rewards, dones, _ = self.env.step(scaled_actions)
 
-                # img = (next_states[0] + 1) / 2
-                # plt.imshow(img.cpu().numpy().transpose(1, 2, 0))
-                # plt.show()
-                # plt.pause(1)
-
-                h_a, c_a = hidden_states_actor
-                h_c, c_c = hidden_states_critic
-
-                states_tensor[:, t] = states
-                actions_tensor[:, t] = actions
-                rewards_tensor[:, t] = rewards
-                values_tensor[:, t] = value.squeeze()
-                log_probs_tensor[:, t] = log_prob
-                dones_tensor[:, t] = dones
-                hidden_states_actor_tensor[:, t, 0, :] = h_a.squeeze()
-                hidden_states_actor_tensor[:, t, 1, :] = c_a.squeeze()
-                hidden_states_critic_tensor[:, t, 0, :] = h_c.squeeze()
-                hidden_states_critic_tensor[:, t, 1, :] = c_c.squeeze()
+                tensor_manager.update_tensors(
+                    states,
+                    actions,
+                    rewards,
+                    value,
+                    log_prob,
+                    dones,
+                    hidden_states_actor,
+                    hidden_states_critic,
+                    t,
+                )
 
                 for i in range(self.env_num):
                     if dones[i] and done_times[i] == -1:
@@ -215,88 +184,50 @@ class Train:
 
                 self.time_step += 1
 
-            # done_times를 참고하여 dones_times 이후의 데이터를 필터링
-            for i in range(self.env_num):
-                if done_times[i] != -1:
-                    # 마지막 step 이후의 데이터를 0으로 설정
-                    actions_tensor[i, done_times[i] :] = 0
-                    rewards_tensor[i, done_times[i] :] = 0
-                    values_tensor[i, done_times[i] + 1 :] = 0
-                    log_probs_tensor[i, done_times[i] :] = 0
-                    dones_tensor[i, done_times[i] :] = 1
-                    hidden_states_actor_tensor[i, done_times[i] + 1 :, :, :] = 0
-                    hidden_states_critic_tensor[i, done_times[i] + 1 :, :, :] = 0
-                    positional_encoded_tensor[i, done_times[i] :] = 0
-
-            remaining_steps = np.sum(
-                [self.horizon if t == -1 else t for t in done_times]
-            )
+            # 데이터 수집 단계 종료
+            tensor_manager.filter_with_done_times(done_times)
 
             for i in range(self.env_num):
-                # 환경이 끝났다면, 마지막 상태의 value를 0으로 설정
-                if done_times[i] != -1:
-                    values_tensor[i, done_times[i]] = 0
                 # 환경이 끝나지 않았다면, 마지막 상태의 value를 계산
+                if done_times[i] == -1:
+                    tensor_manager.values_tensor[i, done_times[i]] = 0
+                # 환경이 끝났다면, 마지막 상태의 value를 0으로 설정
                 else:
-                    h_c = hidden_states_critic_tensor[i, -1, 0, :].unsqueeze(0)
-                    c_c = hidden_states_critic_tensor[i, -1, 1, :].unsqueeze(0)
+                    h_c = tensor_manager.hidden_states_critic_tensor[
+                        i, -1, 0, :
+                    ].unsqueeze(0)
+                    c_c = tensor_manager.hidden_states_critic_tensor[
+                        i, -1, 1, :
+                    ].unsqueeze(0)
                     next_value, _ = self.agent.get_value(
                         next_states[i].unsqueeze(0),
-                        positional_encoded_tensor[i, -1, :],
+                        tensor_manager.positional_encoded_tensor[i, -1, :],
                         (h_c, c_c),
                     )
-                    values_tensor[i, -1] = next_value.squeeze()
+                    tensor_manager.values_tensor[i, -1] = next_value.squeeze()
 
-            advs = self.get_gae(rewards_tensor, values_tensor, dones_tensor, done_times)
-
-            states_tensor = self.filter_post_done_data(
-                states_tensor, done_times, self.env_num, remaining_steps
-            )
-            actions_tensor = self.filter_post_done_data(
-                actions_tensor, done_times, self.env_num, remaining_steps
-            )
-            advs = self.filter_post_done_data(
-                advs, done_times, self.env_num, remaining_steps
-            )
-            values_tensor = self.filter_post_done_data(
-                values_tensor, done_times, self.env_num, remaining_steps
-            )
-            log_probs_tensor = self.filter_post_done_data(
-                log_probs_tensor,
+            advs = self.get_gae(
+                tensor_manager.rewards_tensor,
+                tensor_manager.values_tensor,
+                tensor_manager.dones_tensor,
                 done_times,
-                self.env_num,
-                remaining_steps,
             )
-            hidden_states_actor_tensor = self.filter_post_done_data(
-                hidden_states_actor_tensor,
-                done_times,
-                self.env_num,
-                remaining_steps,
-            )
-            hidden_states_critic_tensor = self.filter_post_done_data(
-                hidden_states_critic_tensor,
-                done_times,
-                self.env_num,
-                remaining_steps,
-            )
-            positional_encoded_tensor = self.filter_post_done_data(
-                positional_encoded_tensor,
-                done_times,
-                self.env_num,
-                remaining_steps,
-            )
-
+            tensor_manager.advantages_tensor = advs
+            tensor_manager.filter_post_done_data(done_times)
+            remaining_steps = sum(self.horizon if t == -1 else t for t in done_times)
             actor_loss, critic_loss = self.train(
-                states_tensor,
-                actions_tensor,
-                advs,
-                values_tensor,
-                log_probs_tensor,
-                hidden_states_actor_tensor,
-                hidden_states_critic_tensor,
-                positional_encoded_tensor,
+                tensor_manager.states_tensor,
+                tensor_manager.actions_tensor,
+                tensor_manager.advantages_tensor,
+                tensor_manager.values_tensor,
+                tensor_manager.log_probs_tensor,
+                tensor_manager.hidden_states_actor_tensor,
+                tensor_manager.hidden_states_critic_tensor,
+                tensor_manager.positional_encoded_tensor,
             )
-            eval_rewards = torch.sum(rewards_tensor, dim=1)  # 각 환경별 총 보상 계산
+            eval_rewards = torch.sum(
+                tensor_manager.rewards_tensor
+            )  # 각 환경별 총 보상 계산
 
             self.agent.schedule_lr(actor_loss, critic_loss)
             self.print_logs(
@@ -402,24 +333,151 @@ class Train:
         plt.savefig(f"results/results_graphs.png")
         plt.close()
 
-    def filter_post_done_data(self, tensor, done_times, env_num, remaining_steps):
+
+class TensorManager:
+    def __init__(self, env_num, horizon, states_shape, action_dim, hidden_dim, device):
+        self.env_num = env_num
+        self.horizon = horizon
+        self.states_shape = states_shape
+        self.action_dim = action_dim
+        self.hidden_dim = hidden_dim
+        self.device = device
+
+        self.states_tensor = self.init_tensor(
+            [self.env_num, self.horizon, *self.states_shape], False
+        )
+        self.actions_tensor = self.init_tensor(
+            [self.env_num, self.horizon, self.action_dim], False
+        )
+        self.rewards_tensor = self.init_tensor([self.env_num, self.horizon], False)
+        self.values_tensor = self.init_tensor([self.env_num, self.horizon + 1], False)
+        self.log_probs_tensor = self.init_tensor([self.env_num, self.horizon], False)
+        self.dones_tensor = self.init_tensor([self.env_num, self.horizon + 1], False)
+        self.hidden_states_actor_tensor = self.init_tensor(
+            [self.env_num, self.horizon, 2, 64], False
+        )
+        self.hidden_states_critic_tensor = self.init_tensor(
+            [self.env_num, self.horizon, 2, 64], False
+        )
+        self.positional_encoded_vector = positional_encoding(
+            time_step=self.horizon, d_model=16
+        ).unsqueeze(0)
+        self.positional_encoded_tensor = self.positional_encoded_vector.repeat(
+            self.env_num, 1, 1
+        ).to(self.device)
+        self.advantages_tensor = self.init_tensor([self.env_num, self.horizon], False)
+
+    def init_tensor(self, shape, requires_grad):
+        return torch.zeros(shape, requires_grad=requires_grad).to(self.device)
+
+    def reset_done_flags(self, done_times):
+        for i, done_time in enumerate(done_times):
+            if done_time != -1:
+                self.dones_tensor[i, done_time:] = 1
+
+    def update_tensors(
+        self,
+        states,
+        actions,
+        rewards,
+        values,
+        log_probs,
+        dones,
+        hidden_states_actor,
+        hidden_states_critic,
+        t,
+    ):
+        self.states_tensor[:, t] = states
+        self.actions_tensor[:, t] = actions
+        self.rewards_tensor[:, t] = rewards
+        self.values_tensor[:, t] = values.squeeze()
+        self.log_probs_tensor[:, t] = log_probs
+        self.dones_tensor[:, t] = dones
+        self.hidden_states_actor_tensor[:, t, 0, :] = hidden_states_actor[0].squeeze()
+        self.hidden_states_actor_tensor[:, t, 1, :] = hidden_states_actor[1].squeeze()
+        self.hidden_states_critic_tensor[:, t, 0, :] = hidden_states_critic[0].squeeze()
+        self.hidden_states_critic_tensor[:, t, 1, :] = hidden_states_critic[1].squeeze()
+
+    def reset_done_flags(self, done_times):
+        for i, done_time in enumerate(done_times):
+            if done_time != -1:
+                self.dones_tensor[i, done_time:] = 1
+
+    def filter_post_done_data(self, tensor, done_times):
+        for i, done_time in enumerate(done_times):
+            if done_time != -1:
+                tensor[i, done_time:] = 0
+        return tensor
+
+    def filter_with_done_times(self, done_times):
+        # done_times를 참고하여 dones_times 이후의 데이터를 필터링
+        for i in range(self.env_num):
+            if done_times[i] != -1:
+                # 마지막 step 이후의 데이터를 0으로 설정
+                self.actions_tensor[i, done_times[i] :] = 0
+                self.rewards_tensor[i, done_times[i] :] = 0
+                self.values_tensor[i, done_times[i] + 1 :] = 0
+                self.log_probs_tensor[i, done_times[i] :] = 0
+                self.dones_tensor[i, done_times[i] :] = 1
+                self.hidden_states_actor_tensor[i, done_times[i] + 1 :, :, :] = 0
+                self.hidden_states_critic_tensor[i, done_times[i] + 1 :, :, :] = 0
+                self.positional_encoded_tensor[i, done_times[i] :] = 0
+
+    def filter_post_done_data(self, done_times):
+        # 각 환경의 done_time을 기반으로 필터링된 텐서의 총 길이 계산
+        remaining_steps = sum(self.horizon if t == -1 else t for t in done_times)
+
+        # 모든 관련 텐서에 대한 필터링 수행
+        self.states_tensor = self._filter_tensor(
+            self.states_tensor, done_times, remaining_steps
+        )
+        self.actions_tensor = self._filter_tensor(
+            self.actions_tensor, done_times, remaining_steps
+        )
+        self.rewards_tensor = self._filter_tensor(
+            self.rewards_tensor, done_times, remaining_steps, is_flat=True
+        )
+        self.values_tensor = self._filter_tensor(
+            self.values_tensor, done_times, remaining_steps, is_flat=True
+        )
+        self.log_probs_tensor = self._filter_tensor(
+            self.log_probs_tensor, done_times, remaining_steps, is_flat=True
+        )
+        self.dones_tensor = self._filter_tensor(
+            self.dones_tensor, done_times, remaining_steps, is_flat=True
+        )
+        self.hidden_states_actor_tensor = self._filter_tensor(
+            self.hidden_states_actor_tensor, done_times, remaining_steps
+        )
+        self.hidden_states_critic_tensor = self._filter_tensor(
+            self.hidden_states_critic_tensor, done_times, remaining_steps
+        )
+        self.positional_encoded_tensor = self._filter_tensor(
+            self.positional_encoded_tensor, done_times, remaining_steps
+        )
+        self.advantages_tensor = self._filter_tensor(
+            self.advantages_tensor, done_times, remaining_steps, is_flat=True
+        )
+
+    def _filter_tensor(self, tensor, done_times, remaining_steps, is_flat=False):
         # 필터링된 텐서의 초기화
-        if tensor.ndim == 2:
-            filtered_tensor = torch.zeros([remaining_steps], device=tensor.device)
+        if is_flat:
+            filtered_tensor = torch.zeros([remaining_steps], device=self.device)
         else:
             filtered_tensor = torch.zeros(
-                [remaining_steps, *tensor.shape[2:]], device=tensor.device
+                [remaining_steps, *tensor.shape[2:]], device=self.device
             )
 
-        start_idx, end_idx = 0, 0
-
-        for i in range(env_num):
-            # 각 환경에서 끝나는 시점 계산
-            length = self.horizon if done_times[i] == -1 else done_times[i]
-            end_idx += length
-
-            # 필요한 데이터를 추출하고 복사
-            filtered_tensor[start_idx : start_idx + length] = tensor[i, :length]
-
+        start_idx = 0
+        for i, done_time in enumerate(done_times):
+            length = self.horizon if done_time == -1 else done_time
+            end_idx = start_idx + length
+            if is_flat:
+                filtered_tensor[start_idx:end_idx] = tensor[i, :length].clone()
+            else:
+                filtered_tensor[start_idx:end_idx, ...] = tensor[
+                    i, :length, ...
+                ].clone()
             start_idx = end_idx
+
         return filtered_tensor

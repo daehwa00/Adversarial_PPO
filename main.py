@@ -10,7 +10,7 @@ ENV_NAME = "AdversarialRL"
 
 
 n_iterations = 50000
-lr = 0.0005
+lr = 0.0003
 epochs = 10
 clip_range = 0.2
 mini_batch_size = 64
@@ -21,7 +21,7 @@ env_batch = 256
 
 alpha = 1.0
 beta = 20.0
-gamma = 0.02
+gamma = 0.05
 
 if __name__ == "__main__":
     set_random_seed(2024, deterministic=True)
