@@ -137,8 +137,8 @@ class Train:
             tensor_manager = TensorManager(
                 self.env_num,
                 self.horizon,
-                states.shape[1:],
-                self.env.action_space,
+                states.shape[1:],  # [channel, height, width]
+                self.env.action_space,  # action space
                 self.env.state_space,  # encoded state space
                 self.agent.device,
             )
@@ -149,15 +149,15 @@ class Train:
             self.start_time = time.time()
             self.time_step = 0
 
-            # 1 episode (데이터 수집 단계)
+            # 1 episode (data collection)
             for t in range(self.horizon):
                 # Actor
-                dist, hidden_states_actor = self.agent.choose_dists(
+                dists, hidden_states_actor = self.agent.choose_dists(
                     states, hidden_states_actor, use_grad=False
                 )
-                actions = self.agent.choose_actions(dist)
+                actions = self.agent.choose_actions(dists)
                 scaled_actions = self.agent.scale_actions(actions)
-                log_prob = dist.log_prob(actions).sum(dim=1)
+                log_prob = dists.log_prob(actions).sum(dim=1)
 
                 # Critic
                 position = tensor_manager.positional_encoded_tensor[
