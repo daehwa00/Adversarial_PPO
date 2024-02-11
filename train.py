@@ -111,13 +111,15 @@ class Train:
                 position = position.unsqueeze(2).unsqueeze(3)
 
                 # 업데이트된 숨겨진 상태를 사용하여 critic 및 actor 업데이트
-                value, _ = self.agent.critic_forward(
-                    state, position, hidden_state_critic
+                value, _ = self.agent.get_value(
+                    state, position, hidden_state_critic, use_grad=True
                 )
 
                 critic_loss = (return_ - value).pow(2).mean()
 
-                new_dist, _ = self.agent.actor_forward(state, hidden_state_actor)
+                new_dist, _ = self.agent.choose_dists(
+                    state, hidden_state_actor, use_grad=True
+                )
                 new_log_prob = new_dist.log_prob(action).sum(dim=1)
                 ratio = (new_log_prob - old_log_prob).exp()
 
@@ -151,7 +153,7 @@ class Train:
             for t in range(self.horizon):
                 # Actor
                 dist, hidden_states_actor = self.agent.choose_dists(
-                    states, hidden_states_actor
+                    states, hidden_states_actor, use_grad=False
                 )
                 actions = self.agent.choose_actions(dist)
                 scaled_actions = self.agent.scale_actions(actions)
@@ -162,7 +164,7 @@ class Train:
                     :, self.time_step, :
                 ]
                 value, hidden_states_critic = self.agent.get_value(
-                    states, position, hidden_states_critic
+                    states, position, hidden_states_critic, use_grad=False
                 )
                 next_states, rewards, dones, _ = self.env.step(scaled_actions)
 
@@ -203,6 +205,7 @@ class Train:
                         next_states[i].unsqueeze(0),
                         tensor_manager.positional_encoded_tensor[i, -1, :],
                         (h_c, c_c),
+                        use_grad=False,
                     )
                     tensor_manager.values_tensor[i, -1] = next_value.squeeze()
 

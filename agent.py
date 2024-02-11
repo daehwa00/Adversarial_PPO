@@ -116,10 +116,13 @@ class EncodedAgent(Agent):
 
         return encoded_state.squeeze(0)
 
-    def choose_dists(self, state, hidden_state=None):
+    def choose_dists(self, state, hidden_state=None, use_grad=True):
         encoded_state = self.get_encoded_state(state).squeeze()
-        with torch.no_grad():
+        if use_grad:
             dist, hidden_state = self.actor(encoded_state, hidden_state)
+        else:
+            with torch.no_grad():
+                dist, hidden_state = self.actor(encoded_state, hidden_state)
         return dist, hidden_state
 
     def get_value(
@@ -127,16 +130,21 @@ class EncodedAgent(Agent):
         state,
         position,
         hidden_state=None,
+        use_grad=True,
     ):
         encoded_state = self.get_encoded_state(state).squeeze()
+        position = position.squeeze()
         # concat
         if encoded_state.dim() == 1:
             encoded_state = encoded_state.unsqueeze(0)
             position = position.unsqueeze(0)
         encoded_state = torch.cat((encoded_state, position), dim=1)
 
-        with torch.no_grad():
+        if use_grad:
             value, hidden_state = self.critic(encoded_state, hidden_state)
+        else:
+            with torch.no_grad():
+                value, hidden_state = self.critic(encoded_state, hidden_state)
         return value, hidden_state
 
     def choose_actions(self, dist):
@@ -166,9 +174,3 @@ class EncodedAgent(Agent):
         value, hidden_state = self.critic.forward(encoded_state, hidden_state)
 
         return value, hidden_state
-
-    def actor_forward(self, state, hidden_state=None):
-        encoded_state = self.get_encoded_state(state)
-        dist, hidden_state = self.actor.forward(encoded_state, hidden_state)
-
-        return dist, hidden_state
