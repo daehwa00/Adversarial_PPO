@@ -10,17 +10,19 @@ ENV_NAME = "AdversarialRL"
 
 
 n_iterations = 50000
-lr = 0.0003
+lr = 0.0005
 epochs = 10
 clip_range = 0.2
-mini_batch_size = 64
+mini_batch_size = 128
 T = 64
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 latent_size = 512
 env_batch = 256
+pos_dim = 16
 
+# Reward weights
 alpha = 1.0
-beta = 20.0
+beta = 30.0
 gamma = 0.05
 
 if __name__ == "__main__":

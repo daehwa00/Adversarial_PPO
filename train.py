@@ -1,9 +1,5 @@
 import torch
-import numpy as np
-import time
 import matplotlib.pyplot as plt
-
-from utils import positional_encoding
 
 
 class Train:
@@ -45,7 +41,7 @@ class Train:
         log_probs,
         hidden_states_actor,
         hidden_states_critic,
-        positional_encoded_tensor,
+        time_step_tensor,
     ):
         full_batch_size = states.size(0)
         for _ in range(full_batch_size // mini_batch_size):
@@ -62,21 +58,14 @@ class Train:
                 log_probs[indices],
                 hidden_states_actor[indices],
                 hidden_states_critic[indices],
-                positional_encoded_tensor[indices],
+                time_step_tensor[indices],
             )
 
     def train(
         self,
-        states,
-        actions,
-        advs,
-        values,
-        log_probs,
-        hidden_states_actor,
-        hidden_states_critic,
-        positional_encoded_tensor,
+        tensor_manager,
     ):
-        returns = advs + values
+        returns = tensor_manager.advantages_tensor + tensor_manager.values_tensor
 
         for epoch in range(self.epochs):
             for (
@@ -88,18 +77,18 @@ class Train:
                 old_log_prob,
                 hidden_state_actor,
                 hidden_state_critic,
-                position,
+                time_step,
             ) in self.choose_mini_batch(
                 self.mini_batch_size,
-                states,
-                actions,
+                tensor_manager.states_tensor,
+                tensor_manager.actions_tensor,
                 returns,
-                advs,
-                values,
-                log_probs,
-                hidden_states_actor,
-                hidden_states_critic,
-                positional_encoded_tensor,
+                tensor_manager.advantages_tensor,
+                tensor_manager.values_tensor,
+                tensor_manager.log_probs_tensor,
+                tensor_manager.hidden_states_actor_tensor,
+                tensor_manager.hidden_states_critic_tensor,
+                tensor_manager.time_step_tensor,
             ):
                 h_a = hidden_state_actor[:, 0, :].unsqueeze(0).contiguous()
                 c_a = hidden_state_actor[:, 1, :].unsqueeze(0).contiguous()
@@ -108,12 +97,12 @@ class Train:
                 hidden_state_actor = (h_a, c_a)
                 hidden_state_critic = (h_c, c_c)
 
-                position = position.unsqueeze(2).unsqueeze(3)
-
                 # 업데이트된 숨겨진 상태를 사용하여 critic 및 actor 업데이트
                 value, _ = self.agent.get_value(
-                    state, position, hidden_state_critic, use_grad=True
+                    state, hidden_state_critic, use_grad=True
                 )
+
+                value += -self.env.gamma * time_step.unsqueeze(1)
 
                 critic_loss = (return_ - value).pow(2).mean()
 
@@ -130,10 +119,11 @@ class Train:
         return actor_loss, critic_loss
 
     def step(self):
-        # iteration 횟수만큼 반복
+
         for iteration in range(1, 1 + self.n_iterations):
+            # Initialize the environment
             done_times = [-1] * self.env_num
-            states = self.env.reset()  # 환경 초기화
+            states = self.env.reset()
             tensor_manager = TensorManager(
                 self.env_num,
                 self.horizon,
@@ -142,11 +132,8 @@ class Train:
                 self.env.state_space,  # encoded state space
                 self.agent.device,
             )
-
             hidden_states_actor = None
             hidden_states_critic = None
-
-            self.start_time = time.time()
             self.time_step = 0
 
             # 1 episode (data collection)
@@ -160,12 +147,11 @@ class Train:
                 log_prob = dists.log_prob(actions).sum(dim=1)
 
                 # Critic
-                position = tensor_manager.positional_encoded_tensor[
-                    :, self.time_step, :
-                ]
                 value, hidden_states_critic = self.agent.get_value(
-                    states, position, hidden_states_critic, use_grad=False
+                    states, hidden_states_critic, use_grad=False
                 )
+
+                # apply action to the environment
                 next_states, rewards, dones, _ = self.env.step(scaled_actions)
 
                 tensor_manager.update_tensors(
@@ -203,7 +189,6 @@ class Train:
                     ].unsqueeze(0)
                     next_value, _ = self.agent.get_value(
                         next_states[i].unsqueeze(0),
-                        tensor_manager.positional_encoded_tensor[i, -1, :],
                         (h_c, c_c),
                         use_grad=False,
                     )
@@ -217,21 +202,14 @@ class Train:
             )
             tensor_manager.advantages_tensor = advs
             tensor_manager.filter_post_done_data(done_times)
-            remaining_steps = sum(self.horizon if t == -1 else t for t in done_times)
-            actor_loss, critic_loss = self.train(
-                tensor_manager.states_tensor,
-                tensor_manager.actions_tensor,
-                tensor_manager.advantages_tensor,
-                tensor_manager.values_tensor,
-                tensor_manager.log_probs_tensor,
-                tensor_manager.hidden_states_actor_tensor,
-                tensor_manager.hidden_states_critic_tensor,
-                tensor_manager.positional_encoded_tensor,
-            )
+
+            # Train the agent
+            actor_loss, critic_loss = self.train(tensor_manager)
             eval_rewards = torch.sum(
                 tensor_manager.rewards_tensor
             )  # 각 환경별 총 보상 계산
 
+            remaining_steps = sum(self.horizon if t == -1 else t for t in done_times)
             self.agent.schedule_lr(actor_loss, critic_loss)
             self.print_logs(
                 iteration, actor_loss, critic_loss, eval_rewards, remaining_steps
@@ -362,13 +340,10 @@ class TensorManager:
         self.hidden_states_critic_tensor = self.init_tensor(
             [self.env_num, self.horizon, 2, 64], False
         )
-        self.positional_encoded_vector = positional_encoding(
-            time_step=self.horizon, d_model=16
-        ).unsqueeze(0)
-        self.positional_encoded_tensor = self.positional_encoded_vector.repeat(
-            self.env_num, 1, 1
-        ).to(self.device)
         self.advantages_tensor = self.init_tensor([self.env_num, self.horizon], False)
+        self.time_step_tensor = torch.arange(
+            0, self.horizon, device=self.device
+        ).repeat(self.env_num, 1)
 
     def init_tensor(self, shape, requires_grad):
         return torch.zeros(shape, requires_grad=requires_grad).to(self.device)
@@ -424,7 +399,6 @@ class TensorManager:
                 self.dones_tensor[i, done_times[i] :] = 1
                 self.hidden_states_actor_tensor[i, done_times[i] + 1 :, :, :] = 0
                 self.hidden_states_critic_tensor[i, done_times[i] + 1 :, :, :] = 0
-                self.positional_encoded_tensor[i, done_times[i] :] = 0
 
     def filter_post_done_data(self, done_times):
         # 각 환경의 done_time을 기반으로 필터링된 텐서의 총 길이 계산
@@ -455,11 +429,11 @@ class TensorManager:
         self.hidden_states_critic_tensor = self._filter_tensor(
             self.hidden_states_critic_tensor, done_times, remaining_steps
         )
-        self.positional_encoded_tensor = self._filter_tensor(
-            self.positional_encoded_tensor, done_times, remaining_steps
-        )
         self.advantages_tensor = self._filter_tensor(
             self.advantages_tensor, done_times, remaining_steps, is_flat=True
+        )
+        self.time_step_tensor = self._filter_tensor(
+            self.time_step_tensor, done_times, remaining_steps, is_flat=True
         )
 
     def _filter_tensor(self, tensor, done_times, remaining_steps, is_flat=False):

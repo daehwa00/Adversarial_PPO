@@ -47,7 +47,6 @@ class Env:
         return self.current_state
 
     def step(self, actions):
-        self.actions_taken += 1
         modified_image = self.apply_actions(self.current_state, actions)
 
         # 수정된 이미지를 모델과 동일한 장치로 이동
@@ -65,6 +64,7 @@ class Env:
         self.current_state = modified_image
         self.previous_prediction = new_prediction
 
+        self.actions_taken += 1
         return modified_image, reward, done, {}
 
     def apply_actions(self, images, actions):

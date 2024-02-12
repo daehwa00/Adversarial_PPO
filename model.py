@@ -66,10 +66,13 @@ class Critic(nn.Module):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.n_states = n_states
 
-        self.fc1 = nn.Linear(in_features=self.n_states, out_features=64)
-        self.fc2 = nn.Linear(in_features=64, out_features=64)
-        self.lstm = nn.LSTM(input_size=64, hidden_size=hidden_size, num_layers=1)
-        self.value = nn.Linear(in_features=hidden_size, out_features=1)
+        self.fc1 = nn.Linear(in_features=self.n_states, out_features=hidden_size)
+        self.fc2 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+        self.lstm = nn.LSTM(
+            input_size=hidden_size, hidden_size=hidden_size, num_layers=1
+        )
+        self.value_1 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+        self.value_2 = nn.Linear(in_features=hidden_size, out_features=1)
 
         for layer in self.modules():
             if isinstance(layer, nn.Linear):
@@ -84,13 +87,16 @@ class Critic(nn.Module):
             hidden_states, batch_size, self.device
         )
         x = x.squeeze()
-        x = torch.tanh(self.fc1(x))
-        x = torch.tanh(self.fc2(x))
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
         x = x.unsqueeze(0)
 
         output, hidden_states = self.lstm(x, hidden_states)
 
-        value = self.value(output.squeeze(0))
+        value = torch.relu(self.value_1(output.squeeze(0)))
+        if value.dim() == 1:
+            value = value.unsqueeze(0)
+        value = self.value_2(value)
 
         return value, hidden_states
 
