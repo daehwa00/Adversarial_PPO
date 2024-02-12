@@ -128,8 +128,9 @@ class Train:
                 self.horizon,
                 states.shape[1:],  # [channel, height, width]
                 self.env.action_space,  # action space
-                self.env.state_space,  # encoded state space
                 self.agent.device,
+                encoded_space=self.env.state_space,  # encoded state space
+                hidden_dim=self.agent.hidden_dim,
             )
             hidden_states_actor = None
             hidden_states_critic = None

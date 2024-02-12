@@ -9,7 +9,7 @@ from utils import set_random_seed
 ENV_NAME = "AdversarialRL"
 
 
-n_iterations = 50000
+n_iterations = 1000
 lr = 0.0005
 epochs = 10
 clip_range = 0.2
@@ -18,6 +18,7 @@ T = 64
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 latent_size = 512
 env_batch = 256
+hidden_dim = 256
 
 # Reward weights
 alpha = 1.0
@@ -46,6 +47,7 @@ if __name__ == "__main__":
         n_iter=n_iterations,
         n_states=env.state_space,
         n_actions=env.action_space,
+        hidden_dim=hidden_dim,
         lr=lr,
     )
 

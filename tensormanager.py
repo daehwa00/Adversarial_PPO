@@ -2,7 +2,16 @@ import torch
 
 
 class TensorManager:
-    def __init__(self, env_num, horizon, states_shape, action_dim, hidden_dim, device):
+    def __init__(
+        self,
+        env_num,
+        horizon,
+        states_shape,
+        action_dim,
+        device,
+        encoded_space,
+        hidden_dim,
+    ):
         self.env_num = env_num
         self.horizon = horizon
         self.states_shape = states_shape
@@ -21,10 +30,10 @@ class TensorManager:
         self.log_probs_tensor = self.init_tensor([self.env_num, self.horizon], False)
         self.dones_tensor = self.init_tensor([self.env_num, self.horizon + 1], False)
         self.hidden_states_actor_tensor = self.init_tensor(
-            [self.env_num, self.horizon, 2, 64], False
+            [self.env_num, self.horizon, 2, hidden_dim], False
         )
         self.hidden_states_critic_tensor = self.init_tensor(
-            [self.env_num, self.horizon, 2, 64], False
+            [self.env_num, self.horizon, 2, hidden_dim], False
         )
         self.advantages_tensor = self.init_tensor([self.env_num, self.horizon], False)
         self.time_step_tensor = torch.arange(

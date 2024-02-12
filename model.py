@@ -5,16 +5,16 @@ from torch.distributions import normal
 
 
 class Actor(nn.Module):
-    def __init__(self, n_states, n_actions, hidden_size=64):
+    def __init__(self, n_states, n_actions, hidden_dim=64):
         super(Actor, self).__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.n_states = n_states
         self.n_actions = n_actions
 
-        self.fc1 = nn.Linear(in_features=self.n_states, out_features=64)
-        self.fc2 = nn.Linear(in_features=64, out_features=64)
-        self.lstm = nn.LSTM(input_size=64, hidden_size=hidden_size, num_layers=1)
-        self.mu = nn.Linear(in_features=hidden_size, out_features=n_actions)
+        self.fc1 = nn.Linear(in_features=self.n_states, out_features=hidden_dim)
+        self.fc2 = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
+        self.lstm = nn.LSTM(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=1)
+        self.mu = nn.Linear(in_features=hidden_dim, out_features=n_actions)
 
         self.log_std = nn.Parameter(torch.zeros(1, self.n_actions))
 
@@ -62,24 +62,25 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, n_states, hidden_size=64, seq_len=64):
+    def __init__(self, n_states, hidden_dim=256, seq_len=64):
         super(Critic, self).__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.n_states = n_states
         self.seq_len = seq_len
 
         # 학습 가능한 위치 임베딩 레이어 추가
-        self.position_embedding = nn.Embedding(seq_len, hidden_size)
+        self.position_embedding = nn.Embedding(seq_len, hidden_dim)
 
         self.fc1 = nn.Linear(
-            in_features=self.n_states + hidden_size, out_features=hidden_size
+            in_features=self.n_states + hidden_dim, out_features=hidden_dim
         )  # 입력 차원 수정
-        self.fc2 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
-        self.lstm = nn.LSTM(
-            input_size=hidden_size, hidden_size=hidden_size, num_layers=1
+        self.fc2 = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
+        self.lstm = nn.LSTM(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=1)
+        self.value_1 = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
+        self.value_2 = nn.Linear(
+            in_features=hidden_dim + hidden_dim, out_features=hidden_dim
         )
-        self.value_1 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
-        self.value_2 = nn.Linear(in_features=hidden_size, out_features=1)
+        self.value_3 = nn.Linear(in_features=hidden_dim, out_features=1)
 
         for layer in self.modules():
             if isinstance(layer, nn.Linear):
@@ -106,9 +107,11 @@ class Critic(nn.Module):
         output, hidden_states = self.lstm(x, hidden_states)
 
         value = F.relu(self.value_1(output.squeeze(0)))
+        value = torch.cat([value, position_embedding], dim=-1)
         if value.dim() == 1:
             value = value.unsqueeze(0)
-        value = self.value_2(value)
+        value = F.relu(self.value_2(value))
+        value = self.value_3(value)
 
         return value, hidden_states
 

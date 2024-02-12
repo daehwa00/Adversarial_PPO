@@ -57,9 +57,8 @@ class Env:
         argmax_new_prediction = torch.argmax(new_prediction, dim=1)
 
         done = (self.original_class != argmax_new_prediction).float()
-
-        # done이면 추가 보상 50을 줌
-        reward += done.cpu() * self.beta
+        sucess_reward = done.cpu() * self.beta
+        reward += sucess_reward
 
         self.current_state = modified_image
         self.previous_prediction = new_prediction

@@ -7,18 +7,21 @@ from torch.optim.lr_scheduler import LambdaLR
 
 
 class Agent:
-    def __init__(self, env_name, n_iter, n_states, n_actions, lr):
+    def __init__(self, env_name, n_iter, n_states, n_actions, hidden_dim, lr):
         self.env_name = env_name
         self.n_iter = n_iter
         self.n_states = n_states
         self.n_actions = n_actions
+        self.hidden_dim = hidden_dim
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.lr = lr
 
-        self.actor = Actor(n_states=self.n_states, n_actions=self.n_actions).to(
+        self.actor = Actor(
+            n_states=self.n_states, n_actions=self.n_actions, hidden_dim=hidden_dim
+        ).to(self.device)
+        self.critic = Critic(n_states=self.n_states, hidden_dim=hidden_dim).to(
             self.device
         )
-        self.critic = Critic(n_states=self.n_states).to(self.device)
 
         self.actor_optimizer = Adam(self.actor.parameters(), lr=self.lr, eps=1e-5)
         self.critic_optimizer = Adam(self.critic.parameters(), lr=self.lr, eps=1e-5)
@@ -28,7 +31,9 @@ class Agent:
         self.scheduler = lambda step: max(1.0 - float(step / self.n_iter), 1e-5)
 
         self.actor_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=self.scheduler)
-        self.critic_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=self.scheduler)
+        self.critic_scheduler = LambdaLR(
+            self.critic_optimizer, lr_lambda=self.scheduler
+        )
 
     def optimize(self, actor_loss, critic_loss):
         self.actor_optimizer.zero_grad()
@@ -88,9 +93,12 @@ class EncodedAgent(Agent):
         n_iter,
         n_states,
         n_actions,
+        hidden_dim,
         lr,
     ):
-        super(EncodedAgent, self).__init__(env_name, n_iter, n_states, n_actions, lr)
+        super(EncodedAgent, self).__init__(
+            env_name, n_iter, n_states, n_actions, hidden_dim, lr
+        )
         self.encoder = encoder
         self.encoder.eval()  # Encoder를 평가 모드로 설정
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
