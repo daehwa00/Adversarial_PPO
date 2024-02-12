@@ -18,7 +18,6 @@ T = 64
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 latent_size = 512
 env_batch = 256
-pos_dim = 16
 
 # Reward weights
 alpha = 1.0

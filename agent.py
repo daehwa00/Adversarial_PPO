@@ -30,21 +30,6 @@ class Agent:
         self.actor_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=self.scheduler)
         self.critic_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=self.scheduler)
 
-    def choose_dist(self, state, hidden_state=None):
-        state = np.expand_dims(state, 0)
-        state = from_numpy(state).float().to(self.device)
-        with torch.no_grad():
-            dist, hidden_state = self.actor(state, hidden_state)
-
-        return dist, hidden_state
-
-    def get_value(self, state, hidden_state=None):
-        state = np.expand_dims(state, 0)
-        state = from_numpy(state).float().to(self.device)
-        with torch.no_grad():
-            value, hidden_state = self.critic(state, hidden_state)
-        return value.detach().cpu().numpy(), hidden_state
-
     def optimize(self, actor_loss, critic_loss):
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
