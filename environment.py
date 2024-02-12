@@ -65,7 +65,7 @@ class Env:
         self.previous_prediction = new_prediction
 
         self.actions_taken += 1
-        return modified_image, reward, done, {}
+        return modified_image, reward, done
 
     def apply_actions(self, images, actions):
         # action 텐서를 CPU로 이동시키고 NumPy 배열로 변환

@@ -21,7 +21,7 @@ env_batch = 256
 
 # Reward weights
 alpha = 1.0
-beta = 30.0
+beta = 20.0
 gamma = 0.05
 
 if __name__ == "__main__":
