@@ -68,37 +68,36 @@ class Critic(nn.Module):
         self.n_states = n_states
         self.seq_len = seq_len
 
-        # 학습 가능한 위치 임베딩 레이어 추가
-        self.position_embedding = nn.Embedding(seq_len, hidden_dim)
+        # One-hot encoding을 위해 seq_len을 사용하지 않고, 대신 torch.eye를 사용합니다.
 
         self.fc1 = nn.Linear(
-            in_features=self.n_states + hidden_dim, out_features=hidden_dim
-        )  # 입력 차원 수정
+            in_features=self.n_states + seq_len, out_features=hidden_dim
+        )  # 입력 차원 수정: One-hot 벡터 크기 추가
         self.fc2 = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
         self.lstm = nn.LSTM(input_size=hidden_dim, hidden_size=hidden_dim, num_layers=1)
         self.value_1 = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
         self.value_2 = nn.Linear(
-            in_features=hidden_dim + hidden_dim, out_features=hidden_dim
+            in_features=hidden_dim + seq_len, out_features=hidden_dim
         )
-        self.value_3 = nn.Linear(in_features=hidden_dim, out_features=1)
+        self.value_3 = nn.Linear(in_features=hidden_dim + seq_len, out_features=1)
 
         for layer in self.modules():
             if isinstance(layer, nn.Linear):
                 nn.init.orthogonal_(layer.weight)
                 layer.bias.data.zero_()
 
-    def forward(self, x, position_idx, hidden_states):
+    def forward(self, x, time_step, hidden_states):
         batch_size = x.size(0)
 
+        # One-hot encoding 생성
+        one_hot = torch.zeros(batch_size, self.seq_len, device=self.device)
+        one_hot[torch.arange(batch_size), time_step] = 1
         hidden_states = self.initialize_hidden_states(
             hidden_states, batch_size, self.device
         )
 
-        # 위치 임베딩 조회 및 입력과 결합
-        position_embedding = self.position_embedding(
-            position_idx
-        )  # position_idx는 [batch_size] 차원을 가짐
-        x = torch.cat([x, position_embedding], dim=-1)  # 입력과 위치 임베딩을 결합
+        # One-hot 벡터와 상태 정보를 결합
+        x = torch.cat([x, one_hot], dim=-1)
 
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -107,10 +106,11 @@ class Critic(nn.Module):
         output, hidden_states = self.lstm(x, hidden_states)
 
         value = F.relu(self.value_1(output.squeeze(0)))
-        value = torch.cat([value, position_embedding], dim=-1)
+        value = torch.cat([value, one_hot], dim=-1)
         if value.dim() == 1:
             value = value.unsqueeze(0)
         value = F.relu(self.value_2(value))
+        value = torch.cat([value, one_hot], dim=-1)
         value = self.value_3(value)
 
         return value, hidden_states

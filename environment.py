@@ -102,7 +102,7 @@ class Env:
                 torch.zeros_like(progressive_reward),
             )
 
-            efficiency_reward = -self.gamma * self.actions_taken
+            efficiency_reward = -self.gamma
             reward = progressive_reward + efficiency_reward
 
         return reward.cpu()

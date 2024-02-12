@@ -24,7 +24,7 @@ class Agent:
         )
 
         self.actor_optimizer = Adam(self.actor.parameters(), lr=self.lr, eps=1e-5)
-        self.critic_optimizer = Adam(self.critic.parameters(), lr=self.lr, eps=1e-5)
+        self.critic_optimizer = Adam(self.critic.parameters(), lr=self.lr * 5, eps=1e-5)
 
         self.critic_loss = torch.nn.MSELoss()
 
@@ -131,6 +131,7 @@ class EncodedAgent(Agent):
             encoded_state = encoded_state.unsqueeze(0)
         if use_grad:
             value, hidden_state = self.critic(encoded_state, t, hidden_state)
+
         else:
             with torch.no_grad():
                 value, hidden_state = self.critic(encoded_state, t, hidden_state)
