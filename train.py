@@ -1,6 +1,7 @@
 import torch
 import matplotlib.pyplot as plt
 from tensormanager import TensorManager
+from model import initialize_hidden_states
 
 
 class Train:
@@ -91,10 +92,10 @@ class Train:
                 tensor_manager.hidden_states_critic_tensor,
                 tensor_manager.time_step_tensor,
             ):
-                h_a = hidden_state_actor[:, 0, :].unsqueeze(0).contiguous()
-                c_a = hidden_state_actor[:, 1, :].unsqueeze(0).contiguous()
-                h_c = hidden_state_critic[:, 0, :].unsqueeze(0).contiguous()
-                c_c = hidden_state_critic[:, 1, :].unsqueeze(0).contiguous()
+                h_a = hidden_state_actor[:, :, 0, :].permute(1, 0, 2).contiguous()
+                c_a = hidden_state_actor[:, :, 1, :].permute(1, 0, 2).contiguous()
+                h_c = hidden_state_critic[:, :, 0, :].permute(1, 0, 2).contiguous()
+                c_c = hidden_state_critic[:, :, 1, :].permute(1, 0, 2).contiguous()
                 hidden_state_actor = (h_a, c_a)
                 hidden_state_critic = (h_c, c_c)
 
@@ -125,20 +126,31 @@ class Train:
             tensor_manager = TensorManager(
                 self.env_num,
                 self.horizon,
+                self.agent.num_layers,
                 states.shape[1:],  # [channel, height, width]
                 self.env.action_space,  # action space
                 self.agent.device,
                 encoded_space=self.env.state_space,  # encoded state space
                 hidden_dim=self.agent.hidden_dim,
             )
-            hidden_states_actor = None
-            hidden_states_critic = None
+            prev_hidden_states_actor = initialize_hidden_states(
+                None,
+                self.env_num,
+                self.agent.actor.lstm,
+                self.agent.device,
+            )
+            prev_hidden_states_critic = initialize_hidden_states(
+                None,
+                self.env_num,
+                self.agent.critic.lstm,
+                self.agent.device,
+            )
 
             # 1 episode (data collection)
             for t in range(self.horizon):
                 # Actor
                 dists, hidden_states_actor = self.agent.choose_dists(
-                    states, hidden_states_actor, use_grad=False
+                    states, prev_hidden_states_actor, use_grad=False
                 )
                 actions = self.agent.choose_actions(dists)
                 scaled_actions = self.agent.scale_actions(actions)
@@ -147,7 +159,7 @@ class Train:
                 # Critic
                 value, hidden_states_critic = self.agent.get_value(
                     states,
-                    hidden_states_critic,
+                    prev_hidden_states_critic,
                     use_grad=False,
                 )
 
@@ -161,10 +173,13 @@ class Train:
                     value,
                     log_prob,
                     dones,
-                    hidden_states_actor,
-                    hidden_states_critic,
+                    prev_hidden_states_actor,
+                    prev_hidden_states_critic,
                     t,
                 )
+
+                prev_hidden_states_actor = hidden_states_actor
+                prev_hidden_states_critic = hidden_states_critic
 
                 for i in range(self.env_num):
                     if dones[i] and done_times[i] == -1:
@@ -177,14 +192,16 @@ class Train:
                 # if the epsisode is not done
                 if done_times[i] == -1:
                     h_c = (
-                        tensor_manager.hidden_states_critic_tensor[i, -1, 0, :]
+                        tensor_manager.hidden_states_critic_tensor[i, -1, :, 0, :]
                         .unsqueeze(0)
-                        .unsqueeze(0)
+                        .permute(1, 0, 2)
+                        .contiguous()
                     )
                     c_c = (
-                        tensor_manager.hidden_states_critic_tensor[i, -1, 1, :]
+                        tensor_manager.hidden_states_critic_tensor[i, -1, :, 1, :]
                         .unsqueeze(0)
-                        .unsqueeze(0)
+                        .permute(1, 0, 2)
+                        .contiguous()
                     )
                     next_value, _ = self.agent.get_value(
                         tensor_manager.states_tensor[i, -1].unsqueeze(0),

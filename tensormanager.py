@@ -6,6 +6,7 @@ class TensorManager:
         self,
         env_num,
         horizon,
+        num_layers,
         states_shape,
         action_dim,
         device,
@@ -14,6 +15,7 @@ class TensorManager:
     ):
         self.env_num = env_num
         self.horizon = horizon
+        self.num_layers = num_layers
         self.states_shape = states_shape
         self.action_dim = action_dim
         self.hidden_dim = hidden_dim
@@ -30,10 +32,10 @@ class TensorManager:
         self.log_probs_tensor = self.init_tensor([self.env_num, self.horizon], False)
         self.dones_tensor = self.init_tensor([self.env_num, self.horizon + 1], False)
         self.hidden_states_actor_tensor = self.init_tensor(
-            [self.env_num, self.horizon, 2, hidden_dim], False
+            [self.env_num, self.horizon, self.num_layers, 2, hidden_dim], False
         )
         self.hidden_states_critic_tensor = self.init_tensor(
-            [self.env_num, self.horizon, 2, hidden_dim], False
+            [self.env_num, self.horizon, self.num_layers, 2, hidden_dim], False
         )
         self.advantages_tensor = self.init_tensor([self.env_num, self.horizon], False)
         self.time_step_tensor = torch.arange(
@@ -66,10 +68,18 @@ class TensorManager:
         self.values_tensor[:, t] = values.squeeze()
         self.log_probs_tensor[:, t] = log_probs
         self.dones_tensor[:, t] = dones
-        self.hidden_states_actor_tensor[:, t, 0, :] = hidden_states_actor[0].squeeze()
-        self.hidden_states_actor_tensor[:, t, 1, :] = hidden_states_actor[1].squeeze()
-        self.hidden_states_critic_tensor[:, t, 0, :] = hidden_states_critic[0].squeeze()
-        self.hidden_states_critic_tensor[:, t, 1, :] = hidden_states_critic[1].squeeze()
+        self.hidden_states_actor_tensor[:, t, :, 0, :] = (
+            hidden_states_actor[0].squeeze().permute(1, 0, 2).contiguous()
+        )
+        self.hidden_states_actor_tensor[:, t, :, 1, :] = (
+            hidden_states_actor[1].squeeze().permute(1, 0, 2).contiguous()
+        )
+        self.hidden_states_critic_tensor[:, t, :, 0, :] = (
+            hidden_states_critic[0].squeeze().permute(1, 0, 2).contiguous()
+        )
+        self.hidden_states_critic_tensor[:, t, :, 1, :] = (
+            hidden_states_critic[1].squeeze().permute(1, 0, 2).contiguous()
+        )
 
     def reset_done_flags(self, done_times):
         for i, done_time in enumerate(done_times):

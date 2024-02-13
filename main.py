@@ -19,11 +19,12 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 latent_size = 512
 env_batch = 128
 hidden_dim = 1024
+lstm_num_layers = 4
 
 # Reward weights
 alpha = 1.0
 beta = 20.0
-gamma = 0.0
+gamma = 0.5
 
 if __name__ == "__main__":
     set_random_seed(2024, deterministic=True)
@@ -48,6 +49,7 @@ if __name__ == "__main__":
         n_states=env.state_space,
         n_actions=env.action_space,
         hidden_dim=hidden_dim,
+        num_layers=lstm_num_layers,
         lr=lr,
     )
 
