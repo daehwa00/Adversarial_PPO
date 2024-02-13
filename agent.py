@@ -121,7 +121,6 @@ class EncodedAgent(Agent):
     def get_value(
         self,
         state,
-        t,
         hidden_state=None,
         use_grad=True,
     ):
@@ -130,11 +129,11 @@ class EncodedAgent(Agent):
         if encoded_state.dim() == 1:
             encoded_state = encoded_state.unsqueeze(0)
         if use_grad:
-            value, hidden_state = self.critic(encoded_state, t, hidden_state)
+            value, hidden_state = self.critic(encoded_state, hidden_state)
 
         else:
             with torch.no_grad():
-                value, hidden_state = self.critic(encoded_state, t, hidden_state)
+                value, hidden_state = self.critic(encoded_state, hidden_state)
         return value, hidden_state
 
     def choose_actions(self, dist):

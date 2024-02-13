@@ -100,7 +100,7 @@ class Train:
 
                 # 업데이트된 숨겨진 상태를 사용하여 critic 및 actor 업데이트
                 value, _ = self.agent.get_value(
-                    state, time_step.long(), hidden_state_critic, use_grad=True
+                    state, hidden_state_critic, use_grad=True
                 )
 
                 critic_loss = (return_ - value).pow(2).mean()
@@ -118,7 +118,6 @@ class Train:
         return actor_loss, critic_loss
 
     def step(self):
-
         for iteration in range(1, 1 + self.n_iterations):
             # Initialize the environment
             done_times = [-1] * self.env_num
@@ -148,7 +147,6 @@ class Train:
                 # Critic
                 value, hidden_states_critic = self.agent.get_value(
                     states,
-                    torch.tensor([t] * self.env_num).long().to(self.agent.device),
                     hidden_states_critic,
                     use_grad=False,
                 )
@@ -190,7 +188,6 @@ class Train:
                     )
                     next_value, _ = self.agent.get_value(
                         tensor_manager.states_tensor[i, -1].unsqueeze(0),
-                        torch.tensor([self.horizon - 1]).long().to(self.agent.device),
                         (h_c, c_c),
                         use_grad=False,
                     )
