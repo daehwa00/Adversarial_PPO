@@ -29,9 +29,6 @@ class Env:
         self.action_map = torch.zeros(
             (self.env_batch, 3, 32, 32), dtype=torch.float32, device=self.device
         )
-        self.reset_count = 0  # reset 호출 횟수를 추적
-        self.max_resets = 300  # gamma가 최댓값에 도달하는 reset 횟수
-        self.gamma_increment = (1.0 - gamma) / self.max_resets
 
     def reset(self):
         while True:
@@ -52,12 +49,6 @@ class Env:
         self.original_class = torch.argmax(self.original_prediction, dim=1)
         self.actions_taken = 0
 
-        self.reset_count += 1  # reset 호출 횟수 증가
-        # gamma 값을 조정하되, 최댓값 1.0을 초과하지 않도록 함
-        self.gamma = min(1.0, self.gamma + self.gamma_increment * self.reset_count)
-        # gamma가 최댓값에 도달했을 때의 처리를 위한 조건 추가
-        if self.reset_count >= self.max_resets:
-            self.gamma = 1.0
         return self.current_state
 
     def step(self, actions):

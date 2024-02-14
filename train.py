@@ -99,6 +99,10 @@ class Train:
 
                 actor_loss = self.compute_actor_loss(ratio, adv)
 
+                entropy_loss = new_dist.entropy().mean()
+
+                actor_loss += -0.01 * entropy_loss
+
                 self.agent.optimize(actor_loss, critic_loss)
 
         return actor_loss, critic_loss
