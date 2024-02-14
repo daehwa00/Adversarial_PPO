@@ -26,6 +26,13 @@ class Env:
         self.gamma = gamma
         self.actions_taken = 0
 
+        self.action_map = torch.zeros(
+            (self.env_batch, 3, 32, 32), dtype=torch.float32, device=self.device
+        )
+        self.reset_count = 0  # reset 호출 횟수를 추적
+        self.max_resets = 300  # gamma가 최댓값에 도달하는 reset 횟수
+        self.gamma_increment = (1.0 - gamma) / self.max_resets
+
     def reset(self):
         while True:
             try:
@@ -44,6 +51,13 @@ class Env:
         self.previous_prediction = self.original_prediction
         self.original_class = torch.argmax(self.original_prediction, dim=1)
         self.actions_taken = 0
+
+        self.reset_count += 1  # reset 호출 횟수 증가
+        # gamma 값을 조정하되, 최댓값 1.0을 초과하지 않도록 함
+        self.gamma = min(1.0, self.gamma + self.gamma_increment * self.reset_count)
+        # gamma가 최댓값에 도달했을 때의 처리를 위한 조건 추가
+        if self.reset_count >= self.max_resets:
+            self.gamma = 1.0
         return self.current_state
 
     def step(self, actions):
@@ -64,7 +78,7 @@ class Env:
         self.previous_prediction = new_prediction
 
         self.actions_taken += 1
-        return modified_image, reward, done
+        return modified_image, self.action_map, reward, done
 
     def apply_actions(self, images, actions):
         # action 텐서를 CPU로 이동시키고 NumPy 배열로 변환
@@ -81,6 +95,12 @@ class Env:
         )
         X = X.astype(int)
         Y = Y.astype(int)
+
+        for i in range(self.env_batch):
+            self.action_map[i, 0, Y[i], X[i]] = R[i] / 255.0  # R 채널 업데이트, 정규화
+            self.action_map[i, 1, Y[i], X[i]] = G[i] / 255.0  # G 채널 업데이트, 정규화
+            self.action_map[i, 2, Y[i], X[i]] = B[i] / 255.0  # B 채널 업데이트, 정규화
+
         batch_indices = np.arange(images.shape[0])
         images[batch_indices, :, Y, X] = np.stack([R, G, B], axis=-1)
 

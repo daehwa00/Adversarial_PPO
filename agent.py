@@ -8,25 +8,34 @@ from torch.optim.lr_scheduler import LambdaLR
 
 class Agent:
     def __init__(
-        self, env_name, n_iter, n_states, n_actions, hidden_dim, num_layers, lr
+        self,
+        env_name,
+        n_iter,
+        n_states,
+        n_actions,
+        action_map_size,
+        hidden_dim,
+        lr,
     ):
         self.env_name = env_name
         self.n_iter = n_iter
         self.n_states = n_states
         self.n_actions = n_actions
+        self.action_map_size = action_map_size
         self.hidden_dim = hidden_dim
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.num_layers = num_layers
         self.lr = lr
 
         self.actor = Actor(
             n_states=self.n_states,
             n_actions=self.n_actions,
+            action_map_size=self.action_map_size,
             hidden_dim=hidden_dim,
-            num_layers=num_layers,
         ).to(self.device)
         self.critic = Critic(
-            n_states=self.n_states, hidden_dim=hidden_dim, num_layers=num_layers
+            n_states=self.n_states,
+            action_map_size=self.action_map_size,
+            hidden_dim=hidden_dim,
         ).to(self.device)
 
         self.actor_optimizer = Adam(self.actor.parameters(), lr=self.lr, eps=1e-5)
@@ -99,12 +108,12 @@ class EncodedAgent(Agent):
         n_iter,
         n_states,
         n_actions,
+        action_map_size,
         hidden_dim,
-        num_layers,
         lr,
     ):
         super(EncodedAgent, self).__init__(
-            env_name, n_iter, n_states, n_actions, hidden_dim, num_layers, lr
+            env_name, n_iter, n_states, n_actions, action_map_size, hidden_dim, lr
         )
         self.encoder = encoder
         self.encoder.eval()  # Encoder를 평가 모드로 설정
@@ -116,19 +125,19 @@ class EncodedAgent(Agent):
 
         return encoded_state.squeeze(0)
 
-    def choose_dists(self, state, hidden_state=None, use_grad=True):
+    def choose_dists(self, state, action_map, use_grad=True):
         encoded_state = self.get_encoded_state(state).squeeze()
         if use_grad:
-            dist, hidden_state = self.actor(encoded_state, hidden_state)
+            dist = self.actor(encoded_state, action_map)
         else:
             with torch.no_grad():
-                dist, hidden_state = self.actor(encoded_state, hidden_state)
-        return dist, hidden_state
+                dist = self.actor(encoded_state, action_map)
+        return dist
 
     def get_value(
         self,
         state,
-        hidden_state=None,
+        action_map,
         use_grad=True,
     ):
         encoded_state = self.get_encoded_state(state).squeeze()
@@ -136,12 +145,12 @@ class EncodedAgent(Agent):
         if encoded_state.dim() == 1:
             encoded_state = encoded_state.unsqueeze(0)
         if use_grad:
-            value, hidden_state = self.critic(encoded_state, hidden_state)
+            value = self.critic(encoded_state, action_map)
 
         else:
             with torch.no_grad():
-                value, hidden_state = self.critic(encoded_state, hidden_state)
-        return value, hidden_state
+                value = self.critic(encoded_state, action_map)
+        return value
 
     def choose_actions(self, dist):
         action = dist.sample()
