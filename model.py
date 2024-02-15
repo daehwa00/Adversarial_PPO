@@ -73,6 +73,9 @@ class Critic(nn.Module):
         # 최종 가치 출력을 위한 레이어
         self.value_head = nn.Linear(in_features=hidden_dim, out_features=1)
 
+        self.cls_token = nn.Parameter(torch.randn(1, hidden_dim))
+        self.postions = nn.Parameter(torch.randn(32 * 32 + 1, hidden_dim))
+
         self._init_weights()
 
     def _init_weights(self):
