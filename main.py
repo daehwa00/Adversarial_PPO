@@ -1,4 +1,4 @@
-from agent import EncodedAgent
+from agent import Agent
 import torch
 from classifier import load_model_and_filtered_loader
 from autoencoder import load_pretrained_autoencoder
@@ -19,7 +19,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 latent_size = 512
 env_batch = 128
 hidden_dim = 1024
-action_map_size = 3 * 32 * 32
+action_map_size = [3, 32, 32]
 
 # Reward weights
 alpha = 1.0
@@ -31,8 +31,6 @@ if __name__ == "__main__":
     pre_trained_classifier, filtered_loader = load_model_and_filtered_loader(
         device, env_batch
     )
-    autoencoder = load_pretrained_autoencoder(latent_size=latent_size)
-    encoder = autoencoder.encoder
     env = make_env(
         classifier=pre_trained_classifier,
         filtered_loader=filtered_loader,
@@ -42,8 +40,7 @@ if __name__ == "__main__":
         gamma=gamma,
     )
 
-    agent = EncodedAgent(
-        encoder=encoder,
+    agent = Agent(
         env_name=ENV_NAME,
         n_iter=n_iterations,
         n_states=env.state_space,

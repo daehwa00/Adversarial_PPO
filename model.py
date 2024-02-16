@@ -5,11 +5,12 @@ from torch.distributions import normal
 
 
 class Actor(nn.Module):
-    def __init__(self, n_actions, image_size, hidden_dim=256):
+    def __init__(self, n_actions, image_size=32, hidden_dim=256):
         super(Actor, self).__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.hidden_dim = hidden_dim
         self.image_size = image_size
+        self.n_actions = n_actions
 
         # Action map 임베딩을 위한 FC 레이어
         self.action_map_fc = nn.Linear(3, hidden_dim)  # RGB 3차원 -> hidden_dim 임베딩
@@ -79,7 +80,7 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, hidden_dim=128, image_size=32):
+    def __init__(self, image_size=32, hidden_dim=128):
         super(Critic, self).__init__()
         self.hidden_dim = hidden_dim
         self.image_size = image_size

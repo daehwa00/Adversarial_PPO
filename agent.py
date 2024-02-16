@@ -21,20 +21,22 @@ class Agent:
         self.n_iter = n_iter
         self.n_states = n_states
         self.n_actions = n_actions
-        self.action_map_size = action_map_size
         self.hidden_dim = hidden_dim
+        self.action_map_size = action_map_size
+        self.channel, self.height, self.width = action_map_size
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.lr = lr
 
+        # Actor
         self.actor = Actor(
-            n_states=self.n_states,
             n_actions=self.n_actions,
-            action_map_size=self.action_map_size,
+            image_size=self.height,
             hidden_dim=hidden_dim,
         ).to(self.device)
+
+        # Critic
         self.critic = Critic(
-            n_states=self.n_states,
-            action_map_size=self.action_map_size,
+            image_size=self.height,
             hidden_dim=hidden_dim,
         ).to(self.device)
 
@@ -99,57 +101,24 @@ class Agent:
         self.actor.train()
         self.critic.train()
 
-
-class EncodedAgent(Agent):
-    def __init__(
-        self,
-        encoder,
-        env_name,
-        n_iter,
-        n_states,
-        n_actions,
-        action_map_size,
-        hidden_dim,
-        lr,
-    ):
-        super(EncodedAgent, self).__init__(
-            env_name, n_iter, n_states, n_actions, action_map_size, hidden_dim, lr
-        )
-        self.encoder = encoder
-        self.encoder.eval()  # Encoder를 평가 모드로 설정
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-    def get_encoded_state(self, state):
-        with torch.no_grad():
-            encoded_state = self.encoder(state)
-
-        return encoded_state.squeeze(0)
-
     def choose_dists(self, state, action_map, use_grad=True):
-        encoded_state = self.get_encoded_state(state).squeeze()
         if use_grad:
-            dist = self.actor(encoded_state, action_map)
+            dist = self.actor(state, action_map)
         else:
             with torch.no_grad():
-                dist = self.actor(encoded_state, action_map)
+                dist = self.actor(state, action_map)
         return dist
 
-    def get_value(
-        self,
-        state,
-        action_map,
-        use_grad=True,
-    ):
-        encoded_state = self.get_encoded_state(state).squeeze()
+    def get_value(self, state, action_map, use_grad=True):
         # concat
-        if encoded_state.dim() == 1:
-            encoded_state = encoded_state.unsqueeze(0)
+        if state.dim() == 1:
+            state = state.unsqueeze(0)
         if use_grad:
-            value = self.critic(encoded_state, action_map)
+            value = self.critic(state, action_map)
 
         else:
             with torch.no_grad():
-                value = self.critic(encoded_state, action_map)
+                value = self.critic(state, action_map)
         return value
 
     def choose_actions(self, dist):
