@@ -16,6 +16,7 @@ class Agent:
         hidden_dim,
         n_layers,
         lr,
+        warmup_steps,
     ):
         self.env_name = env_name
         self.n_iter = n_iter
@@ -25,6 +26,7 @@ class Agent:
         self.channel, self.height, self.width = action_map_size
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.lr = lr
+        self.warmup_steps = warmup_steps
 
         # Actor
         self.actor = Actor(
@@ -48,10 +50,13 @@ class Agent:
 
         self.scheduler = lambda step: max(1.0 - float(step / self.n_iter), 1e-5)
 
-        self.actor_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=self.scheduler)
-        self.critic_scheduler = LambdaLR(
-            self.critic_optimizer, lr_lambda=self.scheduler
-        )
+        def lr_lambda(step):
+            if step < self.warmup_steps:
+                return float(step) / float(max(1, self.warmup_steps))
+            return max(0.1, float(self.warmup_steps**0.5) * (step**-0.5))
+
+        self.actor_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=lr_lambda)
+        self.critic_scheduler = LambdaLR(self.critic_optimizer, lr_lambda=lr_lambda)
 
     def optimize(self, actor_loss, critic_loss):
         self.actor_optimizer.zero_grad()

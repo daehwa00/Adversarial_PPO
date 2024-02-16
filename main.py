@@ -21,6 +21,7 @@ env_batch = 128
 hidden_dim = 128
 action_map_size = [3, 32, 32]
 n_layers = 3
+warmup_steps = 1000
 
 # Reward weights
 alpha = 1.0
@@ -48,6 +49,7 @@ if __name__ == "__main__":
         hidden_dim=hidden_dim,
         n_layers=n_layers,
         lr=lr,
+        warmup_steps=warmup_steps,
     )
 
     trainer = Train(
