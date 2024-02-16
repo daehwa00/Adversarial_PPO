@@ -10,7 +10,7 @@ ENV_NAME = "AdversarialRL"
 
 
 n_iterations = 5000
-lr = 0.001
+lr = 1e-4
 epochs = 10
 clip_range = 0.2
 mini_batch_size = 256
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         action_map_size=action_map_size,
         hidden_dim=hidden_dim,
         n_layers=n_layers,
-        lr=lr,
+        base_lr=lr,
         warmup_steps=warmup_steps,
     )
 

@@ -15,7 +15,7 @@ class Agent:
         action_map_size,
         hidden_dim,
         n_layers,
-        lr,
+        base_lr,
         warmup_steps,
     ):
         self.env_name = env_name
@@ -25,7 +25,8 @@ class Agent:
         self.action_map_size = action_map_size
         self.channel, self.height, self.width = action_map_size
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.lr = lr
+        self.cnn_lr = base_lr * 10
+        self.other_lr = base_lr
         self.warmup_steps = warmup_steps
 
         # Actor
@@ -43,8 +44,55 @@ class Agent:
             n_layers=n_layers,
         ).to(self.device)
 
-        self.actor_optimizer = Adam(self.actor.parameters(), lr=self.lr, eps=1e-5)
-        self.critic_optimizer = Adam(self.critic.parameters(), lr=self.lr, eps=1e-5)
+        actor_params = [
+            {
+                "params": [
+                    *list(self.actor.action_map_fc.parameters()),
+                    *list(self.actor.layer1.parameters()),
+                    *list(self.actor.layer2.parameters()),
+                    *list(self.actor.layer3.parameters()),
+                    *list(self.actor.mu.parameters()),
+                    self.actor.log_std,
+                ],
+                "lr": self.cnn_lr,
+            },
+            {
+                "params": [
+                    self.actor.cls_token,
+                    self.actor.position_embedding,
+                    *list(
+                        self.actor.cross_attention_layers.parameters()
+                    ),  # 리스트 변환
+                    *list(self.actor.layer_norms.parameters()),  # 리스트 변환
+                ],
+                "lr": self.other_lr,
+            },  # cls_token과 position_embedding 학습률
+        ]
+
+        critic_params = [
+            {
+                "params": [
+                    *list(self.critic.action_map_fc.parameters()),
+                    *list(self.critic.layer1.parameters()),
+                    *list(self.critic.layer2.parameters()),
+                    *list(self.critic.layer3.parameters()),
+                    *list(self.critic.value_head.parameters()),
+                ],
+                "lr": self.cnn_lr,
+            },
+            {
+                "params": [
+                    self.critic.cls_token,
+                    self.critic.position_embedding,
+                    *list(self.critic.cross_attention_layers.parameters()),
+                    *list(self.critic.layer_norms.parameters()),
+                ],
+                "lr": self.other_lr,
+            },
+        ]
+
+        self.actor_optimizer = Adam(actor_params, eps=1e-5)
+        self.critic_optimizer = Adam(critic_params, eps=1e-5)
 
         self.critic_loss = torch.nn.MSELoss()
 
