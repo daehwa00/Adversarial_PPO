@@ -113,11 +113,11 @@ class Train:
             done_times = [-1] * self.env_num
             states = self.env.reset()
             tensor_manager = TensorManager(
-                self.env_num,
-                self.horizon,
-                states.shape[1:],  # [channel, height, width]
-                self.env.action_space,  # action space
-                self.agent.device,
+                env_num=self.env_num,
+                horizon=self.horizon,
+                image_shape=states.shape[1:],  # [channel, height, width]
+                action_dim=self.env.action_space,  # action space
+                device=self.agent.device,
             )
 
             prev_action_map = torch.zeros(

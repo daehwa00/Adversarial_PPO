@@ -5,7 +5,7 @@ from torch.distributions import normal
 
 
 class Actor(nn.Module):
-    def __init__(self, n_actions, image_size=32, hidden_dim=256):
+    def __init__(self, n_actions, image_size=32, hidden_dim=256, n_layers=3):
         super(Actor, self).__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.hidden_dim = hidden_dim
@@ -43,11 +43,8 @@ class Actor(nn.Module):
     def forward(self, state, action_map):
         batch_size = state.size(0)
 
-        # Action map 임베딩 및 위치 임베딩 추가
-        action_map_emb = self.action_map_fc(action_map.view(-1, 3))
-        action_map_emb = action_map_emb.view(
-            batch_size, self.image_size * self.image_size, self.hidden_dim
-        )
+        action_map = action_map.view(batch_size, 3, -1).permute(0, 2, 1)
+        action_map_emb = self.action_map_fc(action_map)
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
         action_map_emb = (
             torch.cat((cls_tokens, action_map_emb), dim=1) + self.position_embedding
@@ -58,8 +55,8 @@ class Actor(nn.Module):
         cnn_out = self.layer2(cnn_out)
         cnn_out = self.layer3(cnn_out)
 
-        # CNN feature map을 sequence of vectors로 변환
-        cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()  # (batch_size, H, W, C)
+        # (batch_size, C, H, W) -> (batch_size, H, W, C)
+        cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()
         cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)  # (batch_size, H*W, C)
 
         # Cross-attention: CNN features를 key와 value로, action map 임베딩을 query로 사용
@@ -80,10 +77,11 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, image_size=32, hidden_dim=128):
+    def __init__(self, image_size=32, hidden_dim=128, n_layers=3):
         super(Critic, self).__init__()
         self.hidden_dim = hidden_dim
         self.image_size = image_size
+        self.n_layers = n_layers
 
         # Action map 임베딩을 위한 FC 레이어
         self.action_map_fc = nn.Linear(3, hidden_dim)  # RGB 3차원 -> hidden_dim 임베딩
@@ -101,6 +99,7 @@ class Critic(nn.Module):
         )
         # Cross-attention layer
         self.cross_attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
+
         # 최종 가치를 예측하기 위한 레이어
         self.value_head = nn.Linear(hidden_dim, 1)
 
@@ -108,10 +107,8 @@ class Critic(nn.Module):
         batch_size = state.size(0)
 
         # Action map 임베딩 및 위치 임베딩 추가
-        action_map_emb = self.action_map_fc(action_map.view(-1, 3))
-        action_map_emb = action_map_emb.view(
-            batch_size, self.image_size * self.image_size, self.hidden_dim
-        )
+        action_map = action_map.view(batch_size, 3, -1).permute(0, 2, 1)
+        action_map_emb = self.action_map_fc(action_map)
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
         action_map_emb = (
             torch.cat((cls_tokens, action_map_emb), dim=1) + self.position_embedding
@@ -122,8 +119,8 @@ class Critic(nn.Module):
         cnn_out = self.layer2(cnn_out)
         cnn_out = self.layer3(cnn_out)
 
-        # CNN feature map을 sequence of vectors로 변환
-        cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()  # (batch_size, H, W, C)
+        # (batch_size, C, H, W) -> (batch_size, H, W, C)
+        cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()
         cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)  # (batch_size, H*W, C)
 
         # Cross-attention: CNN features를 key와 value로, action map 임베딩을 query로 사용

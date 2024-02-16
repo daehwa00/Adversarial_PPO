@@ -15,6 +15,7 @@ class Agent:
         n_actions,
         action_map_size,
         hidden_dim,
+        n_layers,
         lr,
     ):
         self.env_name = env_name
@@ -32,12 +33,14 @@ class Agent:
             n_actions=self.n_actions,
             image_size=self.height,
             hidden_dim=hidden_dim,
+            n_layers=n_layers,
         ).to(self.device)
 
         # Critic
         self.critic = Critic(
             image_size=self.height,
             hidden_dim=hidden_dim,
+            n_layers=n_layers,
         ).to(self.device)
 
         self.actor_optimizer = Adam(self.actor.parameters(), lr=self.lr, eps=1e-5)

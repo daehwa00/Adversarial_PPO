@@ -18,8 +18,9 @@ T = 64
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 latent_size = 512
 env_batch = 128
-hidden_dim = 1024
+hidden_dim = 128
 action_map_size = [3, 32, 32]
+n_layers = 3
 
 # Reward weights
 alpha = 1.0
@@ -47,6 +48,7 @@ if __name__ == "__main__":
         n_actions=env.action_space,
         action_map_size=action_map_size,
         hidden_dim=hidden_dim,
+        n_layers=n_layers,
         lr=lr,
     )
 

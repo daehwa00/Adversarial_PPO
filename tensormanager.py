@@ -6,21 +6,21 @@ class TensorManager:
         self,
         env_num,
         horizon,
-        states_shape,
+        image_shape,
         action_dim,
         device,
     ):
         self.env_num = env_num
         self.horizon = horizon
-        self.states_shape = states_shape
+        self.image_shape = image_shape
         self.action_dim = action_dim
         self.device = device
 
         self.states_tensor = self.init_tensor(
-            [self.env_num, self.horizon, *self.states_shape], False
+            [self.env_num, self.horizon, *self.image_shape], False
         )
         self.action_maps_tensor = self.init_tensor(
-            [self.env_num, self.horizon, *self.states_shape], False
+            [self.env_num, self.horizon, *self.image_shape], False
         )
         self.actions_tensor = self.init_tensor(
             [self.env_num, self.horizon, self.action_dim], False
