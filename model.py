@@ -11,9 +11,10 @@ class Actor(nn.Module):
         self.hidden_dim = hidden_dim
         self.image_size = image_size
         self.n_actions = n_actions
+        self.n_layers = n_layers
 
         # Action map 임베딩을 위한 FC 레이어
-        self.action_map_fc = nn.Linear(3, hidden_dim)  # RGB 3차원 -> hidden_dim 임베딩
+        self.action_map_fc = nn.Linear(3, hidden_dim)
 
         # CNN feature extractor 구성
         self.layer1 = ResidualBlock(3, 32, stride=1)
@@ -26,8 +27,17 @@ class Actor(nn.Module):
         self.position_embedding = nn.Parameter(
             torch.randn(1, image_size * image_size + 1, hidden_dim)
         )
-        # Cross-attention layer
-        self.cross_attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
+
+        # Cross-attention layers 구성
+        self.cross_attention_layers = nn.ModuleList(
+            [
+                nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
+                for _ in range(n_layers)
+            ]
+        )
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
+        )
 
         self.mu = nn.Linear(in_features=hidden_dim, out_features=n_actions)
         self.log_std = nn.Parameter(torch.zeros(1, self.n_actions))
@@ -43,6 +53,7 @@ class Actor(nn.Module):
     def forward(self, state, action_map):
         batch_size = state.size(0)
 
+        # Action map 임베딩 및 위치 임베딩 추가
         action_map = action_map.view(batch_size, 3, -1).permute(0, 2, 1)
         action_map_emb = self.action_map_fc(action_map)
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
@@ -54,17 +65,22 @@ class Actor(nn.Module):
         cnn_out = self.layer1(state)
         cnn_out = self.layer2(cnn_out)
         cnn_out = self.layer3(cnn_out)
-
-        # (batch_size, C, H, W) -> (batch_size, H, W, C)
         cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()
-        cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)  # (batch_size, H*W, C)
+        cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)
 
-        # Cross-attention: CNN features를 key와 value로, action map 임베딩을 query로 사용
-        attn_output, _ = self.cross_attention(
-            query=action_map_emb.permute(1, 0, 2),  # (seq_len, batch_size, hidden_dim)
-            key=cnn_out.permute(1, 0, 2),  # (seq_len, batch_size, hidden_dim)
-            value=cnn_out.permute(1, 0, 2),  # (seq_len, batch_size, hidden_dim)
-        )
+        # 여러 개의 Cross-attention layers 적용
+        attn_output = action_map_emb.permute(1, 0, 2)  # Initial query
+        for i in range(self.n_layers):
+            attn_layer_output, _ = self.cross_attention_layers[i](
+                query=attn_output,
+                key=cnn_out.permute(1, 0, 2),
+                value=cnn_out.permute(1, 0, 2),
+            )
+            # Residual connection 및 LayerNorm 적용
+            attn_output = attn_output + attn_layer_output  # Residual sum
+            attn_output = self.layer_norms[i](attn_output.permute(1, 0, 2)).permute(
+                1, 0, 2
+            )
 
         # 최종 가치 예측을 위해 cls_token만 사용
         cls_token_output = attn_output[0]
@@ -84,7 +100,7 @@ class Critic(nn.Module):
         self.n_layers = n_layers
 
         # Action map 임베딩을 위한 FC 레이어
-        self.action_map_fc = nn.Linear(3, hidden_dim)  # RGB 3차원 -> hidden_dim 임베딩
+        self.action_map_fc = nn.Linear(3, hidden_dim)
 
         # CNN feature extractor 구성
         self.layer1 = ResidualBlock(3, 32, stride=1)
@@ -97,8 +113,17 @@ class Critic(nn.Module):
         self.position_embedding = nn.Parameter(
             torch.randn(1, image_size * image_size + 1, hidden_dim)
         )
-        # Cross-attention layer
-        self.cross_attention = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
+
+        # Cross-attention layers 구성
+        self.cross_attention_layers = nn.ModuleList(
+            [
+                nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
+                for _ in range(n_layers)
+            ]
+        )
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
+        )
 
         # 최종 가치를 예측하기 위한 레이어
         self.value_head = nn.Linear(hidden_dim, 1)
@@ -118,17 +143,22 @@ class Critic(nn.Module):
         cnn_out = self.layer1(state)
         cnn_out = self.layer2(cnn_out)
         cnn_out = self.layer3(cnn_out)
-
-        # (batch_size, C, H, W) -> (batch_size, H, W, C)
         cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()
-        cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)  # (batch_size, H*W, C)
+        cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)
 
-        # Cross-attention: CNN features를 key와 value로, action map 임베딩을 query로 사용
-        attn_output, _ = self.cross_attention(
-            query=action_map_emb.permute(1, 0, 2),  # (seq_len, batch_size, hidden_dim)
-            key=cnn_out.permute(1, 0, 2),  # (seq_len, batch_size, hidden_dim)
-            value=cnn_out.permute(1, 0, 2),  # (seq_len, batch_size, hidden_dim)
-        )
+        # 여러 개의 Cross-attention layers 적용
+        attn_output = action_map_emb.permute(1, 0, 2)  # Initial query
+        for i in range(self.n_layers):
+            attn_layer_output, _ = self.cross_attention_layers[i](
+                query=attn_output,
+                key=cnn_out.permute(1, 0, 2),
+                value=cnn_out.permute(1, 0, 2),
+            )
+            # Residual connection 및 LayerNorm 적용
+            attn_output = attn_output + attn_layer_output  # Residual sum
+            attn_output = self.layer_norms[i](attn_output.permute(1, 0, 2)).permute(
+                1, 0, 2
+            )
 
         # 최종 가치 예측을 위해 cls_token만 사용
         cls_token_output = attn_output[0]
