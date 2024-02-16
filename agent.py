@@ -11,7 +11,6 @@ class Agent:
         self,
         env_name,
         n_iter,
-        n_states,
         n_actions,
         action_map_size,
         hidden_dim,
@@ -20,7 +19,6 @@ class Agent:
     ):
         self.env_name = env_name
         self.n_iter = n_iter
-        self.n_states = n_states
         self.n_actions = n_actions
         self.hidden_dim = hidden_dim
         self.action_map_size = action_map_size

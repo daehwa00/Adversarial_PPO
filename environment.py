@@ -7,7 +7,6 @@ class Env:
         self,
         classifier,
         filtered_loader,
-        latent_vector_size,
         time_horizon=10,
         alpha=1.0,  # 점진적 보상 가중치
         beta=20.0,  # 최종 보상 가중치
@@ -17,7 +16,6 @@ class Env:
         self.original_loader = filtered_loader
         self.filtered_loader = iter(self.original_loader)
         self.time_horizon = time_horizon
-        self.state_space = latent_vector_size  # latent vector size
         self.action_space = 5  # R, G, B, X, Y
         self.env_batch = filtered_loader.batch_size
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -122,7 +120,6 @@ class Env:
 def make_env(
     classifier,
     filtered_loader,
-    latent_vector_size=512,
     alpha=1.0,
     beta=20.0,
     gamma=1.0,
@@ -130,7 +127,6 @@ def make_env(
     return Env(
         classifier,
         filtered_loader,
-        latent_vector_size,
         alpha=alpha,
         beta=beta,
         gamma=gamma,

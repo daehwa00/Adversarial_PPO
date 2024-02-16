@@ -10,13 +10,13 @@ ENV_NAME = "AdversarialRL"
 
 
 n_iterations = 5000
-lr = 0.0005
+lr = 0.001
 epochs = 10
 clip_range = 0.2
-mini_batch_size = 128
-T = 64
+mini_batch_size = 256
+T = 64  # Horizon
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-latent_size = 512
+
 env_batch = 128
 hidden_dim = 128
 action_map_size = [3, 32, 32]
@@ -35,7 +35,6 @@ if __name__ == "__main__":
     env = make_env(
         classifier=pre_trained_classifier,
         filtered_loader=filtered_loader,
-        latent_vector_size=latent_size,
         alpha=alpha,
         beta=beta,
         gamma=gamma,
@@ -44,7 +43,6 @@ if __name__ == "__main__":
     agent = Agent(
         env_name=ENV_NAME,
         n_iter=n_iterations,
-        n_states=env.state_space,
         n_actions=env.action_space,
         action_map_size=action_map_size,
         hidden_dim=hidden_dim,
