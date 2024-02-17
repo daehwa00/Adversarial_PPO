@@ -3,5 +3,7 @@ __pycache__/
 data/
 pre-trained-models/
 .vscode/
+results/
 
 *.ipynb
+*.png   

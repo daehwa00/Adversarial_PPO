@@ -1,7 +1,6 @@
 import torch
 import matplotlib.pyplot as plt
 from tensormanager import TensorManager
-from model import initialize_hidden_states
 
 
 class Train:
@@ -37,12 +36,11 @@ class Train:
         mini_batch_size,
         states,
         actions,
+        action_maps,
         returns,
         advs,
         values,
         log_probs,
-        hidden_states_actor,
-        hidden_states_critic,
         time_step_tensor,
     ):
         full_batch_size = states.size(0)
@@ -54,12 +52,11 @@ class Train:
             yield (
                 states[indices],
                 actions[indices],
+                action_maps[indices],
                 returns[indices],
                 advs[indices],
                 values[indices],
                 log_probs[indices],
-                hidden_states_actor[indices],
-                hidden_states_critic[indices],
                 time_step_tensor[indices],
             )
 
@@ -73,46 +70,38 @@ class Train:
             for (
                 state,
                 action,
+                action_map,
                 return_,
                 adv,
                 old_value,
                 old_log_prob,
-                hidden_state_actor,
-                hidden_state_critic,
                 time_step,
             ) in self.choose_mini_batch(
                 self.mini_batch_size,
                 tensor_manager.states_tensor,
                 tensor_manager.actions_tensor,
+                tensor_manager.action_maps_tensor,
                 returns,
                 tensor_manager.advantages_tensor,
                 tensor_manager.values_tensor,
                 tensor_manager.log_probs_tensor,
-                tensor_manager.hidden_states_actor_tensor,
-                tensor_manager.hidden_states_critic_tensor,
                 tensor_manager.time_step_tensor,
             ):
-                h_a = hidden_state_actor[:, :, 0, :].permute(1, 0, 2).contiguous()
-                c_a = hidden_state_actor[:, :, 1, :].permute(1, 0, 2).contiguous()
-                h_c = hidden_state_critic[:, :, 0, :].permute(1, 0, 2).contiguous()
-                c_c = hidden_state_critic[:, :, 1, :].permute(1, 0, 2).contiguous()
-                hidden_state_actor = (h_a, c_a)
-                hidden_state_critic = (h_c, c_c)
 
                 # 업데이트된 숨겨진 상태를 사용하여 critic 및 actor 업데이트
-                value, _ = self.agent.get_value(
-                    state, hidden_state_critic, use_grad=True
-                )
+                value = self.agent.get_value(state, action_map, use_grad=True)
 
                 critic_loss = (return_ - value).pow(2).mean()
 
-                new_dist, _ = self.agent.choose_dists(
-                    state, hidden_state_actor, use_grad=True
-                )
+                new_dist = self.agent.choose_dists(state, action_map, use_grad=True)
                 new_log_prob = new_dist.log_prob(action).sum(dim=1)
                 ratio = (new_log_prob - old_log_prob).exp()
 
                 actor_loss = self.compute_actor_loss(ratio, adv)
+
+                entropy_loss = new_dist.entropy().mean()
+
+                # actor_loss += -0.05 * entropy_loss
 
                 self.agent.optimize(actor_loss, critic_loss)
 
@@ -124,66 +113,46 @@ class Train:
             done_times = [-1] * self.env_num
             states = self.env.reset()
             tensor_manager = TensorManager(
-                self.env_num,
-                self.horizon,
-                self.agent.num_layers,
-                states.shape[1:],  # [channel, height, width]
-                self.env.action_space,  # action space
-                self.agent.device,
-                encoded_space=self.env.state_space,  # encoded state space
-                hidden_dim=self.agent.hidden_dim,
-            )
-            prev_hidden_states_actor = initialize_hidden_states(
-                None,
-                self.env_num,
-                self.agent.actor.lstm,
-                self.agent.device,
-            )
-            prev_hidden_states_critic = initialize_hidden_states(
-                None,
-                self.env_num,
-                self.agent.critic.lstm,
-                self.agent.device,
+                env_num=self.env_num,
+                horizon=self.horizon,
+                image_shape=states.shape[1:],  # [channel, height, width]
+                action_dim=self.env.action_space,  # action space
+                device=self.agent.device,
             )
 
+            prev_action_map = torch.zeros(
+                self.env_num, *states.shape[1:], device=self.agent.device
+            )
             # 1 episode (data collection)
             for t in range(self.horizon):
                 # Actor
-                dists, hidden_states_actor = self.agent.choose_dists(
-                    states, prev_hidden_states_actor, use_grad=False
-                )
+                dists = self.agent.choose_dists(states, prev_action_map, use_grad=False)
                 actions = self.agent.choose_actions(dists)
                 scaled_actions = self.agent.scale_actions(actions)
                 log_prob = dists.log_prob(actions).sum(dim=1)
 
                 # Critic
-                value, hidden_states_critic = self.agent.get_value(
-                    states,
-                    prev_hidden_states_critic,
-                    use_grad=False,
-                )
+                value = self.agent.get_value(states, prev_action_map, use_grad=False)
 
                 # apply action to the environment
-                next_states, rewards, dones = self.env.step(scaled_actions)
+                next_states, action_map, rewards, dones = self.env.step(scaled_actions)
 
                 tensor_manager.update_tensors(
                     states,
+                    prev_action_map,
                     actions,
                     rewards,
                     value,
                     log_prob,
                     dones,
-                    prev_hidden_states_actor,
-                    prev_hidden_states_critic,
                     t,
                 )
-
-                prev_hidden_states_actor = hidden_states_actor
-                prev_hidden_states_critic = hidden_states_critic
 
                 for i in range(self.env_num):
                     if dones[i] and done_times[i] == -1:
                         done_times[i] = t + 1
+
+                prev_action_map = action_map
 
             # 데이터 수집 단계 종료
             tensor_manager.filter_with_done_times(done_times)
@@ -191,21 +160,9 @@ class Train:
             for i in range(self.env_num):
                 # if the epsisode is not done
                 if done_times[i] == -1:
-                    h_c = (
-                        tensor_manager.hidden_states_critic_tensor[i, -1, :, 0, :]
-                        .unsqueeze(0)
-                        .permute(1, 0, 2)
-                        .contiguous()
-                    )
-                    c_c = (
-                        tensor_manager.hidden_states_critic_tensor[i, -1, :, 1, :]
-                        .unsqueeze(0)
-                        .permute(1, 0, 2)
-                        .contiguous()
-                    )
-                    next_value, _ = self.agent.get_value(
+                    next_value = self.agent.get_value(
                         tensor_manager.states_tensor[i, -1].unsqueeze(0),
-                        (h_c, c_c),
+                        tensor_manager.action_maps_tensor[i, -1].unsqueeze(0),
                         use_grad=False,
                     )
                     tensor_manager.values_tensor[i, done_times[i]] = next_value

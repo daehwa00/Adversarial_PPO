@@ -5,96 +5,197 @@ from torch.distributions import normal
 
 
 class Actor(nn.Module):
-    def __init__(self, n_states, n_actions, hidden_dim=256, num_layers=1):
+    def __init__(self, n_actions, image_size=32, hidden_dim=256, n_layers=3):
         super(Actor, self).__init__()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.n_states = n_states
+        self.hidden_dim = hidden_dim
+        self.image_size = image_size
         self.n_actions = n_actions
-        self.num_layers = num_layers
+        self.n_layers = n_layers
 
-        self.fc1 = nn.Linear(in_features=self.n_states, out_features=hidden_dim)
-        self.fc2 = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
+        # Action map 임베딩을 위한 FC 레이어
+        self.action_map_fc = nn.Linear(3, hidden_dim)
 
-        self.lstm = nn.LSTM(
-            input_size=hidden_dim, hidden_size=hidden_dim, num_layers=self.num_layers
+        # CNN feature extractor 구성
+        self.layer1 = ResidualBlock(3, 32, stride=1)
+        self.layer2 = ResidualBlock(32, 64, stride=2)
+        self.layer3 = ResidualBlock(64, hidden_dim, stride=2)
+
+        # cls_token 임베딩
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
+        # 위치 임베딩
+        self.position_embedding = nn.Parameter(
+            torch.randn(1, image_size * image_size + 1, hidden_dim)
         )
+
+        # Cross-attention layers 구성
+        self.cross_attention_layers = nn.ModuleList(
+            [
+                nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
+                for _ in range(n_layers)
+            ]
+        )
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
+        )
+
         self.mu = nn.Linear(in_features=hidden_dim, out_features=n_actions)
         self.log_std = nn.Parameter(torch.zeros(1, self.n_actions))
 
+        self._init_weights()
+
+    def _init_weights(self):
         for layer in self.modules():
             if isinstance(layer, nn.Linear):
                 nn.init.orthogonal_(layer.weight)
                 layer.bias.data.zero_()
 
-    def forward(self, x, hidden_states):
-        batch_size = x.size(0)
+    def forward(self, state, action_map):
+        batch_size = state.size(0)
 
-        hidden_states = initialize_hidden_states(
-            hidden_states, batch_size, self.lstm, self.device
+        # Action map 임베딩 및 위치 임베딩 추가
+        action_map = action_map.view(batch_size, 3, -1).permute(0, 2, 1)
+        action_map_emb = self.action_map_fc(action_map)
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+        action_map_emb = (
+            torch.cat((cls_tokens, action_map_emb), dim=1) + self.position_embedding
         )
-        x = x.squeeze()
-        x = torch.tanh(self.fc1(x))
-        x = torch.tanh(self.fc2(x))
-        x = x.unsqueeze(0)
-        output, hidden_states = self.lstm(x, hidden_states)
-        mu = self.mu(output.squeeze(0))
+
+        # CNN을 통한 특징 추출
+        cnn_out = self.layer1(state)
+        cnn_out = self.layer2(cnn_out)
+        cnn_out = self.layer3(cnn_out)
+        cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()
+        cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)
+
+        # 여러 개의 Cross-attention layers 적용
+        attn_output = action_map_emb.permute(1, 0, 2)  # Initial query
+        for i in range(self.n_layers):
+            attn_layer_output, _ = self.cross_attention_layers[i](
+                query=attn_output,
+                key=cnn_out.permute(1, 0, 2),
+                value=cnn_out.permute(1, 0, 2),
+            )
+            # Residual connection 및 LayerNorm 적용
+            attn_output = attn_output + attn_layer_output  # Residual sum
+            attn_output = self.layer_norms[i](attn_output.permute(1, 0, 2)).permute(
+                1, 0, 2
+            )
+
+        # 최종 가치 예측을 위해 cls_token만 사용
+        cls_token_output = attn_output[0]
+        mu = self.mu(cls_token_output)
         std = torch.exp(self.log_std + 1e-5)
 
         dist = normal.Normal(mu, std)
 
-        return dist, hidden_states
+        return dist
 
 
 class Critic(nn.Module):
-    def __init__(self, n_states, hidden_dim=256, num_layers=1):
+    def __init__(self, image_size=32, hidden_dim=128, n_layers=3):
         super(Critic, self).__init__()
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.n_states = n_states
-        self.num_layers = num_layers
+        self.hidden_dim = hidden_dim
+        self.image_size = image_size
+        self.n_layers = n_layers
 
-        self.fc1 = nn.Linear(in_features=self.n_states, out_features=hidden_dim)
-        self.fc2 = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
-        self.lstm = nn.LSTM(
-            input_size=hidden_dim, hidden_size=hidden_dim, num_layers=self.num_layers
+        # Action map 임베딩을 위한 FC 레이어
+        self.action_map_fc = nn.Linear(3, hidden_dim)
+
+        # CNN feature extractor 구성
+        self.layer1 = ResidualBlock(3, 32, stride=1)
+        self.layer2 = ResidualBlock(32, 64, stride=2)
+        self.layer3 = ResidualBlock(64, hidden_dim, stride=2)
+
+        # cls_token 임베딩
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
+        # 위치 임베딩
+        self.position_embedding = nn.Parameter(
+            torch.randn(1, image_size * image_size + 1, hidden_dim)
         )
-        self.value_1 = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
-        self.value_2 = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
-        self.value_3 = nn.Linear(in_features=hidden_dim, out_features=1)
 
-        for layer in self.modules():
-            if isinstance(layer, nn.Linear):
-                nn.init.orthogonal_(layer.weight)
-                layer.bias.data.zero_()
-
-    def forward(self, x, hidden_states):
-        batch_size = x.size(0)
-
-        hidden_states = initialize_hidden_states(
-            hidden_states, batch_size, self.lstm, self.device
+        # Cross-attention layers 구성
+        self.cross_attention_layers = nn.ModuleList(
+            [
+                nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
+                for _ in range(n_layers)
+            ]
         )
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = x.unsqueeze(0)
-
-        output, hidden_states = self.lstm(x, hidden_states)
-
-        value = F.relu(self.value_1(output.squeeze(0)))
-        if value.dim() == 1:
-            value = value.unsqueeze(0)
-        value = F.relu(self.value_2(value))
-        value = self.value_3(value)
-
-        return value, hidden_states
-
-
-def initialize_hidden_states(hidden_states, batch_size, lstm, device):
-    if hidden_states is None:
-        # 각 hidden_state와 cell_state의 차원을 (batch_size, 1, lstm.hidden_size)로 설정
-        hidden_state = torch.zeros(
-            lstm.num_layers, batch_size, lstm.hidden_size, device=device
+        self.layer_norms = nn.ModuleList(
+            [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
         )
-        cell_state = torch.zeros(
-            lstm.num_layers, batch_size, lstm.hidden_size, device=device
+
+        # 최종 가치를 예측하기 위한 레이어
+        self.value_head = nn.Linear(hidden_dim, 1)
+
+    def forward(self, state, action_map):
+        batch_size = state.size(0)
+
+        # Action map 임베딩 및 위치 임베딩 추가
+        action_map = action_map.view(batch_size, 3, -1).permute(0, 2, 1)
+        action_map_emb = self.action_map_fc(action_map)
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+        action_map_emb = (
+            torch.cat((cls_tokens, action_map_emb), dim=1) + self.position_embedding
         )
-        hidden_states = (hidden_state, cell_state)
-    return hidden_states
+
+        # CNN을 통한 특징 추출
+        cnn_out = self.layer1(state)
+        cnn_out = self.layer2(cnn_out)
+        cnn_out = self.layer3(cnn_out)
+        cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()
+        cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)
+
+        # 여러 개의 Cross-attention layers 적용
+        attn_output = action_map_emb.permute(1, 0, 2)  # Initial query
+        for i in range(self.n_layers):
+            attn_layer_output, _ = self.cross_attention_layers[i](
+                query=attn_output,
+                key=cnn_out.permute(1, 0, 2),
+                value=cnn_out.permute(1, 0, 2),
+            )
+            # Residual connection 및 LayerNorm 적용
+            attn_output = attn_output + attn_layer_output  # Residual sum
+            attn_output = self.layer_norms[i](attn_output.permute(1, 0, 2)).permute(
+                1, 0, 2
+            )
+
+        # 최종 가치 예측을 위해 cls_token만 사용
+        cls_token_output = attn_output[0]
+        value = self.value_head(cls_token_output)
+
+        return value
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=3,
+            stride=stride,
+            padding=1,
+            bias=False,
+        )
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(
+            out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False
+        )
+        self.bn2 = nn.BatchNorm2d(out_channels)
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=stride, bias=False
+                ),
+                nn.BatchNorm2d(out_channels),
+            )
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out

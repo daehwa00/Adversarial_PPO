@@ -7,7 +7,6 @@ class Env:
         self,
         classifier,
         filtered_loader,
-        latent_vector_size,
         time_horizon=10,
         alpha=1.0,  # 점진적 보상 가중치
         beta=20.0,  # 최종 보상 가중치
@@ -17,7 +16,6 @@ class Env:
         self.original_loader = filtered_loader
         self.filtered_loader = iter(self.original_loader)
         self.time_horizon = time_horizon
-        self.state_space = latent_vector_size  # latent vector size
         self.action_space = 5  # R, G, B, X, Y
         self.env_batch = filtered_loader.batch_size
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -25,6 +23,10 @@ class Env:
         self.beta = beta
         self.gamma = gamma
         self.actions_taken = 0
+
+        self.action_map = torch.zeros(
+            (self.env_batch, 3, 32, 32), dtype=torch.float32, device=self.device
+        )
 
     def reset(self):
         while True:
@@ -44,6 +46,7 @@ class Env:
         self.previous_prediction = self.original_prediction
         self.original_class = torch.argmax(self.original_prediction, dim=1)
         self.actions_taken = 0
+
         return self.current_state
 
     def step(self, actions):
@@ -64,7 +67,7 @@ class Env:
         self.previous_prediction = new_prediction
 
         self.actions_taken += 1
-        return modified_image, reward, done
+        return modified_image, self.action_map, reward, done
 
     def apply_actions(self, images, actions):
         # action 텐서를 CPU로 이동시키고 NumPy 배열로 변환
@@ -81,6 +84,12 @@ class Env:
         )
         X = X.astype(int)
         Y = Y.astype(int)
+
+        for i in range(self.env_batch):
+            self.action_map[i, 0, Y[i], X[i]] = R[i] / 255.0  # R 채널 업데이트, 정규화
+            self.action_map[i, 1, Y[i], X[i]] = G[i] / 255.0  # G 채널 업데이트, 정규화
+            self.action_map[i, 2, Y[i], X[i]] = B[i] / 255.0  # B 채널 업데이트, 정규화
+
         batch_indices = np.arange(images.shape[0])
         images[batch_indices, :, Y, X] = np.stack([R, G, B], axis=-1)
 
@@ -111,7 +120,6 @@ class Env:
 def make_env(
     classifier,
     filtered_loader,
-    latent_vector_size=512,
     alpha=1.0,
     beta=20.0,
     gamma=1.0,
@@ -119,7 +127,6 @@ def make_env(
     return Env(
         classifier,
         filtered_loader,
-        latent_vector_size,
         alpha=alpha,
         beta=beta,
         gamma=gamma,
