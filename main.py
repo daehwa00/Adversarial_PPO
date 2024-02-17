@@ -9,8 +9,7 @@ from utils import set_random_seed
 ENV_NAME = "AdversarialRL"
 
 
-n_iterations = 5000
-lr = 1e-4
+lr = 1e-3
 epochs = 10
 clip_range = 0.2
 mini_batch_size = 256
@@ -21,12 +20,13 @@ env_batch = 128
 hidden_dim = 128
 action_map_size = [3, 32, 32]
 n_layers = 3
-warmup_steps = 1000
+warmup_steps = 200
+n_iterations = warmup_steps * 10
 
 # Reward weights
 alpha = 1.0
 beta = 20.0
-gamma = 0.1
+gamma = 0.5
 
 if __name__ == "__main__":
     set_random_seed(2024, deterministic=True)
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         action_map_size=action_map_size,
         hidden_dim=hidden_dim,
         n_layers=n_layers,
-        base_lr=lr,
+        lr=lr,
         warmup_steps=warmup_steps,
     )
 
