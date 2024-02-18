@@ -45,10 +45,21 @@ class Actor(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        for layer in self.modules():
-            if isinstance(layer, nn.Linear):
-                nn.init.orthogonal_(layer.weight)
-                layer.bias.data.zero_()
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight)
+                nn.init.constant_(m.bias, 0)
+
+        # Initialize the embeddings separately
+        nn.init.normal_(self.cls_token, std=0.02)  # cls_token initialization
+        nn.init.normal_(
+            self.position_embedding, std=0.02
+        )  # Position embedding initialization
 
     def forward(self, state, action_map):
         batch_size = state.size(0)
@@ -128,6 +139,17 @@ class Critic(nn.Module):
         # 최종 가치를 예측하기 위한 레이어
         self.value_head = nn.Linear(hidden_dim, 1)
 
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, ResidualBlock):
+                m._init_weights()
+
     def forward(self, state, action_map):
         batch_size = state.size(0)
 
@@ -192,6 +214,18 @@ class ResidualBlock(nn.Module):
                 ),
                 nn.BatchNorm2d(out_channels),
             )
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
