@@ -25,8 +25,8 @@ n_iterations = warmup_steps * 10
 
 # Reward weights
 alpha = 1.0
-beta = 5.0
-gamma = 0.05
+beta = 20.0
+gamma = 0.01
 
 if __name__ == "__main__":
     set_random_seed(2024, deterministic=True)
