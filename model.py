@@ -3,38 +3,52 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import normal
 
+from einops import rearrange
+
 
 class Actor(nn.Module):
-    def __init__(self, n_actions, image_size=32, hidden_dim=256, n_layers=3):
-        super(Actor, self).__init__()
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    def __init__(
+        self, n_actions, image_size=32, hidden_dim=128, n_layers=3, num_heads=8
+    ):
+        super(Critic, self).__init__()
         self.hidden_dim = hidden_dim
         self.image_size = image_size
-        self.n_actions = n_actions
         self.n_layers = n_layers
+        self.n_actions = n_actions
 
-        # Action map 임베딩을 위한 FC 레이어
+        # Define the size of patches
+        self.patch_size = 4
+
+        self.num_patches = (image_size // self.patch_size) ** 2
+
+        # Embedding layers for action map
         self.action_map_fc = nn.Linear(3, hidden_dim)
 
-        # CNN feature extractor 구성
-        self.layer1 = ResidualBlock(3, 32, stride=1)
-        self.layer2 = ResidualBlock(32, 64, stride=2)
-        self.layer3 = ResidualBlock(64, hidden_dim, stride=2)
-
-        # cls_token 임베딩
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
-        # 위치 임베딩
-        self.position_embedding = nn.Parameter(
-            torch.randn(1, image_size * image_size + 1, hidden_dim)
-        )
-
-        # Cross-attention layers 구성
-        self.cross_attention_layers = nn.ModuleList(
+        # Feature extractor layers
+        self.feature_extractors = nn.ModuleList(
             [
-                nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
-                for _ in range(n_layers)
+                ResidualBlock(3, 32, stride=1),
+                ResidualBlock(32, 64, stride=1),
+                ResidualBlock(64, 128, stride=1),
             ]
         )
+        self.num_patches_per_extractor = [
+            image_size**2 // (ps**2) for ps in [4, 4, 4]
+        ]  # 예를 들어 patch size가 모두 4라고 가정
+        self.position_embeddings = nn.ParameterList(
+            [
+                nn.Parameter(torch.randn(1, num_patches, hidden_dim))
+                for num_patches in self.num_patches_per_extractor
+            ]
+        )
+        # cls token
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
+
+        # Cross-attention layers
+        self.cross_attention_layers = nn.ModuleList(
+            [nn.MultiheadAttention(hidden_dim, num_heads) for _ in range(n_layers)]
+        )
+
         self.layer_norms = nn.ModuleList(
             [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
         )
@@ -63,38 +77,45 @@ class Actor(nn.Module):
 
     def forward(self, state, action_map):
         batch_size = state.size(0)
+        # Embedding for action map
+        action_map_emb = self.action_map_fc(action_map.view(-1, 3))
+        action_map_emb = action_map_emb.view(batch_size, -1, self.hidden_dim)
 
-        # Action map 임베딩 및 위치 임베딩 추가
-        action_map = action_map.view(batch_size, 3, -1).permute(0, 2, 1)
-        action_map_emb = self.action_map_fc(action_map)
+        # cls_tokens preparation
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        action_map_emb = (
-            torch.cat((cls_tokens, action_map_emb), dim=1) + self.position_embedding
-        )
+        total_patch_embeddings = []
 
-        # CNN을 통한 특징 추출
-        cnn_out = self.layer1(state)
-        cnn_out = self.layer2(cnn_out)
-        cnn_out = self.layer3(cnn_out)
-        cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()
-        cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)
-
-        # 여러 개의 Cross-attention layers 적용
-        attn_output = action_map_emb.permute(1, 0, 2)  # Initial query
-        for i in range(self.n_layers):
-            attn_layer_output, _ = self.cross_attention_layers[i](
-                query=attn_output,
-                key=cnn_out.permute(1, 0, 2),
-                value=cnn_out.permute(1, 0, 2),
+        for i, extractor in enumerate(self.feature_extractors):
+            feature = extractor(state)
+            # Calculate the number of patches based on the feature map size and patch size
+            num_patches = self.num_patches_per_extractor[i]
+            # Extract patches and reshape for position embedding addition
+            patches = rearrange(
+                feature, "b c (h ph) (w pw) -> b (h w) (ph pw c)", ph=4, pw=4
             )
-            # Residual connection 및 LayerNorm 적용
-            attn_output = attn_output + attn_layer_output  # Residual sum
-            attn_output = self.layer_norms[i](attn_output.permute(1, 0, 2)).permute(
-                1, 0, 2
-            )
+            patches = patches[
+                :, :num_patches, :
+            ]  # Ensure we only use the first 'num_patches' patches
+            pos_embedding = self.position_embeddings[i].expand(batch_size, -1, -1)
+            patches += pos_embedding
+            total_patch_embeddings.append(patches)
 
-        # 최종 가치 예측을 위해 cls_token만 사용
-        cls_token_output = attn_output[0]
+        # Concatenate patch embeddings from different layers
+        patch_embeddings = torch.cat(total_patch_embeddings, dim=1)
+        action_map_emb = torch.cat((cls_tokens, action_map_emb), dim=1)
+
+        # Apply cross-attention
+        for layer_norm, attn_layer in zip(
+            self.layer_norms, self.cross_attention_layers
+        ):
+            action_map_emb = layer_norm(action_map_emb)
+            attn_output, _ = attn_layer(
+                action_map_emb, patch_embeddings, patch_embeddings
+            )
+            action_map_emb += attn_output  # Apply residual connection
+
+        # Extract cls token and apply value head
+        cls_token_output = action_map_emb[:, 0, :]
         mu = self.mu(cls_token_output)
         std = torch.exp(self.log_std + 1e-5)
 
@@ -104,86 +125,110 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, image_size=32, hidden_dim=128, n_layers=3):
+    def __init__(self, image_size=32, hidden_dim=128, n_layers=3, num_heads=8):
         super(Critic, self).__init__()
         self.hidden_dim = hidden_dim
         self.image_size = image_size
         self.n_layers = n_layers
 
-        # Action map 임베딩을 위한 FC 레이어
+        # Define the size of patches
+        self.patch_size = 4
+
+        self.num_patches = (image_size // self.patch_size) ** 2
+
+        # Embedding layers for action map
         self.action_map_fc = nn.Linear(3, hidden_dim)
 
-        # CNN feature extractor 구성
-        self.layer1 = ResidualBlock(3, 32, stride=1)
-        self.layer2 = ResidualBlock(32, 64, stride=2)
-        self.layer3 = ResidualBlock(64, hidden_dim, stride=2)
-
-        # cls_token 임베딩
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
-        # 위치 임베딩
-        self.position_embedding = nn.Parameter(
-            torch.randn(1, image_size * image_size + 1, hidden_dim)
-        )
-
-        # Cross-attention layers 구성
-        self.cross_attention_layers = nn.ModuleList(
+        # Feature extractor layers
+        self.feature_extractors = nn.ModuleList(
             [
-                nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=8)
-                for _ in range(n_layers)
+                ResidualBlock(3, 32, stride=1),
+                ResidualBlock(32, 64, stride=1),
+                ResidualBlock(64, 128, stride=1),
             ]
         )
+        self.num_patches_per_extractor = [
+            image_size**2 // (ps**2) for ps in [4, 4, 4]
+        ]  # 예를 들어 patch size가 모두 4라고 가정
+        self.position_embeddings = nn.ParameterList(
+            [
+                nn.Parameter(torch.randn(1, num_patches, hidden_dim))
+                for num_patches in self.num_patches_per_extractor
+            ]
+        )
+        # cls token
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
+
+        # Cross-attention layers
+        self.cross_attention_layers = nn.ModuleList(
+            [nn.MultiheadAttention(hidden_dim, num_heads) for _ in range(n_layers)]
+        )
+
         self.layer_norms = nn.ModuleList(
             [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
         )
 
-        # 최종 가치를 예측하기 위한 레이어
+        # Value head
         self.value_head = nn.Linear(hidden_dim, 1)
 
-        self._init_weights()
+        self.init_weights()
 
-    def _init_weights(self):
+    def init_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.Linear):
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-            elif isinstance(m, ResidualBlock):
-                m._init_weights()
 
     def forward(self, state, action_map):
         batch_size = state.size(0)
 
-        # Action map 임베딩 및 위치 임베딩 추가
-        action_map = action_map.view(batch_size, 3, -1).permute(0, 2, 1)
-        action_map_emb = self.action_map_fc(action_map)
+        # Embedding for action map
+        action_map_emb = self.action_map_fc(action_map.view(-1, 3))
+        action_map_emb = action_map_emb.view(batch_size, -1, self.hidden_dim)
+
+        # cls_tokens preparation
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        action_map_emb = (
-            torch.cat((cls_tokens, action_map_emb), dim=1) + self.position_embedding
-        )
+        total_patch_embeddings = []
 
-        # CNN을 통한 특징 추출
-        cnn_out = self.layer1(state)
-        cnn_out = self.layer2(cnn_out)
-        cnn_out = self.layer3(cnn_out)
-        cnn_out = cnn_out.permute(0, 2, 3, 1).contiguous()
-        cnn_out = cnn_out.view(batch_size, -1, self.hidden_dim)
-
-        # 여러 개의 Cross-attention layers 적용
-        attn_output = action_map_emb.permute(1, 0, 2)  # Initial query
-        for i in range(self.n_layers):
-            attn_layer_output, _ = self.cross_attention_layers[i](
-                query=attn_output,
-                key=cnn_out.permute(1, 0, 2),
-                value=cnn_out.permute(1, 0, 2),
+        for i, extractor in enumerate(self.feature_extractors):
+            feature = extractor(state)
+            # Calculate the number of patches based on the feature map size and patch size
+            num_patches = self.num_patches_per_extractor[i]
+            # Extract patches and reshape for position embedding addition
+            patches = rearrange(
+                feature, "b c (h ph) (w pw) -> b (h w) (ph pw c)", ph=4, pw=4
             )
-            # Residual connection 및 LayerNorm 적용
-            attn_output = attn_output + attn_layer_output  # Residual sum
-            attn_output = self.layer_norms[i](attn_output.permute(1, 0, 2)).permute(
-                1, 0, 2
-            )
+            patches = patches[
+                :, :num_patches, :
+            ]  # Ensure we only use the first 'num_patches' patches
+            pos_embedding = self.position_embeddings[i].expand(batch_size, -1, -1)
+            patches += pos_embedding
+            total_patch_embeddings.append(patches)
 
-        # 최종 가치 예측을 위해 cls_token만 사용
-        cls_token_output = attn_output[0]
+        # Concatenate patch embeddings from different layers
+        patch_embeddings = torch.cat(total_patch_embeddings, dim=1)
+        action_map_emb = torch.cat((cls_tokens, action_map_emb), dim=1)
+
+        # Apply cross-attention
+        for layer_norm, attn_layer in zip(
+            self.layer_norms, self.cross_attention_layers
+        ):
+            action_map_emb = layer_norm(action_map_emb)
+            attn_output, _ = attn_layer(
+                action_map_emb, patch_embeddings, patch_embeddings
+            )
+            action_map_emb += attn_output  # Apply residual connection
+
+        # Extract cls token and apply value head
+        cls_token_output = action_map_emb[:, 0, :]
         value = self.value_head(cls_token_output)
 
         return value
@@ -214,18 +259,6 @@ class ResidualBlock(nn.Module):
                 ),
                 nn.BatchNorm2d(out_channels),
             )
-
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
