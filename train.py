@@ -275,7 +275,7 @@ class Train:
             if ax.has_data():
                 ax.legend()
 
-        fig.subplots_adjust(hspace=1, wspace=1)  # 서브플롯 간격 조절
+        fig.subplots_adjust(hspace=3, wspace=3)  # 서브플롯 간격 조절
         plt.tight_layout()
         plt.savefig(f"results/results_graphs.png")
         plt.close()
