@@ -16,8 +16,8 @@ mini_batch_size = 8
 T = 64  # Horizon
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-env_batch = 64
-hidden_dim = 64
+env_batch = 30
+hidden_dim = 128
 action_map_size = [3, 32, 32]
 n_layers = 3
 warmup_steps = 200

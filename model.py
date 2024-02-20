@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.distributions import normal
 
 from einops import rearrange
+from einops.layers.torch import Rearrange
 import math
 
 
@@ -22,25 +23,43 @@ class Actor(nn.Module):
         self.num_patches = (image_size // self.patch_size) ** 2
 
         self.action_map_fc = nn.Linear(3, hidden_dim)
+        self.projection = nn.Sequential(
+            nn.Conv2d(
+                3, self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
+            ),
+            Rearrange("b c h w -> b (h w) c"),
+        )
         self.feature_extractors = nn.ModuleList(
             [
-                ResidualBlock(3, 8, stride=1),
-                ResidualBlock(8, 8, stride=1),
-                ResidualBlock(8, 8, stride=1),
+                ResidualBlock(3, 32, stride=2),
+                ResidualBlock(32, 64, stride=2),
             ]
         )
-        # 각 feature map별로 차원을 증가시키는 FC 레이어들
-        self.dim_increase_layers = nn.ModuleList(
-            [nn.Linear(16, hidden_dim) for _ in range(len(self.feature_extractors))]
+        self.projections = nn.ModuleList(
+            [
+                nn.Conv2d(
+                    32,
+                    self.hidden_dim,
+                    kernel_size=self.patch_size,
+                    stride=self.patch_size,
+                ),
+                nn.Conv2d(
+                    64,
+                    self.hidden_dim,
+                    kernel_size=self.patch_size,
+                    stride=self.patch_size,
+                ),
+            ]
         )
         self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
 
+        self.position_embedding = nn.Parameter(
+            torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
+        )
         self.position_embeddings = nn.ParameterList(
             [
-                nn.Parameter(
-                    torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
-                )
-                for _ in self.feature_extractors
+                nn.Parameter(torch.randn(16, hidden_dim)),
+                nn.Parameter(torch.randn(4, hidden_dim)),
             ]
         )
         self.cross_attention_layers = nn.ModuleList(
@@ -70,7 +89,6 @@ class Actor(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
     def forward(self, features, action_map):
-
         batch_size = features.size(0)
         action_map_emb = self.action_map_fc(
             action_map.permute(0, 2, 3, 1).reshape(batch_size, -1, 3)
@@ -78,38 +96,25 @@ class Actor(nn.Module):
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
         patch_embeddings = []
 
-        for i, (extractor, increase_layer, pos_embedding) in enumerate(
+        patches = self.projection(features)
+        patch_embeddings.append(patches)
+
+        for i, (extractor, projection, pos_embedding) in enumerate(
             zip(
                 self.feature_extractors,
-                self.dim_increase_layers,
+                self.projections,
                 self.position_embeddings,
             )
         ):
             features = extractor(features)
-            c, h, w = features.size(1), features.size(2), features.size(3)
-            patches = rearrange(
-                features,
-                "b c (h ph) (w pw) -> b (c h w) (ph pw)",
-                ph=self.patch_size,
-                pw=self.patch_size,
-            )
-            increased_patches = increase_layer(patches)  # 차원 증가
+            patches = projection(features)
+            b, c, h, w = patches.size()
+            patches = rearrange(patches, "b c (h) (w) -> b (h w) c", h=h, w=w)
+            pos_embedding = pos_embedding.unsqueeze(0).expand(batch_size, -1, -1)
 
-            increased_patches = rearrange(
-                increased_patches,
-                "b (c h w) d -> b c (h w) d",
-                h=self.image_size // self.patch_size,
-                w=self.image_size // self.patch_size,
-            )
-            pos_embedding = (
-                pos_embedding.unsqueeze(0).unsqueeze(0).expand(batch_size, c, -1, -1)
-            )
+            patches = patches + pos_embedding
 
-            increased_patches = increased_patches + pos_embedding
-
-            patch_embeddings.append(
-                increased_patches.view(batch_size, -1, self.hidden_dim)
-            )
+            patch_embeddings.append(patches)
 
         patch_embeddings = torch.cat(patch_embeddings, dim=1).permute(1, 0, 2)
         action_map_emb = torch.cat([cls_tokens, action_map_emb], dim=1).permute(1, 0, 2)
@@ -143,25 +148,43 @@ class Critic(nn.Module):
         self.num_patches = (image_size // self.patch_size) ** 2
 
         self.action_map_fc = nn.Linear(3, hidden_dim)
+        self.projection = nn.Sequential(
+            nn.Conv2d(
+                3, self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
+            ),
+            Rearrange("b c h w -> b (h w) c"),
+        )
         self.feature_extractors = nn.ModuleList(
             [
-                ResidualBlock(3, 8, stride=1),
-                ResidualBlock(8, 8, stride=1),
-                ResidualBlock(8, 8, stride=1),
+                ResidualBlock(3, 32, stride=2),
+                ResidualBlock(32, 64, stride=2),
             ]
         )
-        # 각 feature map별로 차원을 증가시키는 FC 레이어들
-        self.dim_increase_layers = nn.ModuleList(
-            [nn.Linear(16, hidden_dim) for _ in range(len(self.feature_extractors))]
+        self.projections = nn.ModuleList(
+            [
+                nn.Conv2d(
+                    32,
+                    self.hidden_dim,
+                    kernel_size=self.patch_size,
+                    stride=self.patch_size,
+                ),
+                nn.Conv2d(
+                    64,
+                    self.hidden_dim,
+                    kernel_size=self.patch_size,
+                    stride=self.patch_size,
+                ),
+            ]
         )
         self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
 
+        self.position_embedding = nn.Parameter(
+            torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
+        )
         self.position_embeddings = nn.ParameterList(
             [
-                nn.Parameter(
-                    torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
-                )
-                for _ in self.feature_extractors
+                nn.Parameter(torch.randn(16, hidden_dim)),
+                nn.Parameter(torch.randn(4, hidden_dim)),
             ]
         )
         self.cross_attention_layers = nn.ModuleList(
@@ -197,38 +220,25 @@ class Critic(nn.Module):
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
         patch_embeddings = []
 
-        for i, (extractor, increase_layer, pos_embedding) in enumerate(
+        patches = self.projection(features)
+        patch_embeddings.append(patches)
+
+        for i, (extractor, projection, pos_embedding) in enumerate(
             zip(
                 self.feature_extractors,
-                self.dim_increase_layers,
+                self.projections,
                 self.position_embeddings,
             )
         ):
             features = extractor(features)
-            c, h, w = features.size(1), features.size(2), features.size(3)
-            patches = rearrange(
-                features,
-                "b c (h ph) (w pw) -> b (c h w) (ph pw)",
-                ph=self.patch_size,
-                pw=self.patch_size,
-            )
-            increased_patches = increase_layer(patches)  # 차원 증가
+            patches = projection(features)
+            b, c, h, w = patches.size()
+            patches = rearrange(patches, "b c (h) (w) -> b (h w) c", h=h, w=w)
+            pos_embedding = pos_embedding.unsqueeze(0).expand(batch_size, -1, -1)
 
-            increased_patches = rearrange(
-                increased_patches,
-                "b (c h w) d -> b c (h w) d",
-                h=self.image_size // self.patch_size,
-                w=self.image_size // self.patch_size,
-            )
-            pos_embedding = (
-                pos_embedding.unsqueeze(0).unsqueeze(0).expand(batch_size, c, -1, -1)
-            )
+            patches = patches + pos_embedding
 
-            increased_patches = increased_patches + pos_embedding
-
-            patch_embeddings.append(
-                increased_patches.view(batch_size, -1, self.hidden_dim)
-            )
+            patch_embeddings.append(patches)
 
         patch_embeddings = torch.cat(patch_embeddings, dim=1).permute(1, 0, 2)
         action_map_emb = torch.cat([cls_tokens, action_map_emb], dim=1).permute(1, 0, 2)
