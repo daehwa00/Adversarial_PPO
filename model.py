@@ -143,11 +143,15 @@ class Critic(nn.Module):
         self.image_size = image_size
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
-        self.patch_size = 4  # Assume square patches
+        self.num_heads = num_heads
+        self.patch_size = 4
+
         # Define patch sizes and their corresponding positional embeddings
         self.num_patches = (image_size // self.patch_size) ** 2
 
         self.action_map_fc = nn.Linear(3, hidden_dim)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
+
         self.projection = nn.Sequential(
             nn.Conv2d(
                 3, self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
@@ -176,7 +180,6 @@ class Critic(nn.Module):
                 ),
             ]
         )
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
 
         self.position_embedding = nn.Parameter(
             torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
