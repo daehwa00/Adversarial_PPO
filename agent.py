@@ -73,7 +73,7 @@ class Agent:
 
     def optimize(self, actor_loss, critic_loss):
         self.actor_optimizer.zero_grad()
-        # actor_loss.backward()
+        actor_loss.backward()
         self.actor_optimizer.step()
 
         self.critic_optimizer.zero_grad()

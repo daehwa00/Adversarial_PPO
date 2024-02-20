@@ -105,7 +105,7 @@ class Actor(nn.Module):
                 pos_embedding.unsqueeze(0).unsqueeze(0).expand(batch_size, c, -1, -1)
             )
 
-            increased_patches += pos_embedding
+            increased_patches = increased_patches + pos_embedding
 
             patch_embeddings.append(
                 increased_patches.view(batch_size, -1, self.hidden_dim)
@@ -121,7 +121,7 @@ class Actor(nn.Module):
             attn_output, _ = attn_layer(
                 action_map_emb, patch_embeddings, patch_embeddings
             )
-            action_map_emb += attn_output
+            action_map_emb = action_map_emb + attn_output
 
         cls_token_output = action_map_emb[0, :, :]
         mu = self.mu(cls_token_output)
@@ -224,7 +224,7 @@ class Critic(nn.Module):
                 pos_embedding.unsqueeze(0).unsqueeze(0).expand(batch_size, c, -1, -1)
             )
 
-            increased_patches += pos_embedding
+            increased_patches = increased_patches + pos_embedding
 
             patch_embeddings.append(
                 increased_patches.view(batch_size, -1, self.hidden_dim)
@@ -240,7 +240,7 @@ class Critic(nn.Module):
             attn_output, _ = attn_layer(
                 action_map_emb, patch_embeddings, patch_embeddings
             )
-            action_map_emb += attn_output
+            action_map_emb = action_map_emb + attn_output
 
         cls_token_output = action_map_emb[0, :, :]
         value = self.value_head(cls_token_output)
