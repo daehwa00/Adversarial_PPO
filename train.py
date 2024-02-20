@@ -230,8 +230,8 @@ class Train:
 
         self.steps_history.append(steps / self.env_num)
         self.rewards_history.append(running_reward.item())
-        self.actor_loss_history.append(actor_loss.item())
-        self.critic_loss_history.append(critic_loss.item())
+        self.actor_loss_history.append(actor_loss)
+        self.critic_loss_history.append(critic_loss)
 
         actor_loss = actor_loss.item() if torch.is_tensor(actor_loss) else actor_loss
         critic_loss = (
