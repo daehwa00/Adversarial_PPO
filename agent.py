@@ -15,6 +15,7 @@ class Agent:
         action_map_size,
         hidden_dim,
         n_layers,
+        num_heads,
         lr,
         warmup_steps,
     ):
@@ -26,21 +27,25 @@ class Agent:
         self.channel, self.height, self.width = action_map_size
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.lr = lr
+        self.num_heads = num_heads
+        self.n_layers = n_layers
         self.warmup_steps = warmup_steps
 
         # Actor
         self.actor = Actor(
             n_actions=self.n_actions,
             image_size=self.height,
-            hidden_dim=hidden_dim,
-            n_layers=n_layers,
+            hidden_dim=self.hidden_dim,
+            n_layers=self.n_layers,
+            num_heads=self.num_heads,
         ).to(self.device)
 
         # Critic
         self.critic = Critic(
             image_size=self.height,
-            hidden_dim=hidden_dim,
-            n_layers=n_layers,
+            hidden_dim=self.hidden_dim,
+            n_layers=self.n_layers,
+            num_heads=self.num_heads,
         ).to(self.device)
 
         self.actor_optimizer = Adam(self.actor.parameters(), lr=lr, eps=1e-8)

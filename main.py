@@ -13,6 +13,7 @@ lr = 1e-3
 epochs = 10
 clip_range = 0.2
 mini_batch_size = 512
+num_heads = 4
 T = 64  # Horizon
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -48,6 +49,7 @@ if __name__ == "__main__":
         action_map_size=action_map_size,
         hidden_dim=hidden_dim,
         n_layers=n_layers,
+        num_heads=num_heads,
         lr=lr,
         warmup_steps=warmup_steps,
     )

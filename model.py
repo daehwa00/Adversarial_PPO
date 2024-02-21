@@ -8,7 +8,7 @@ from einops.layers.torch import Rearrange
 
 class Actor(nn.Module):
     def __init__(
-        self, n_actions, image_size=32, hidden_dim=64, n_layers=3, num_heads=4
+        self, n_actions, image_size=32, hidden_dim=128, n_layers=3, num_heads=4
     ):
         super(Actor, self).__init__()
         self.image_size = image_size
@@ -151,7 +151,7 @@ class Actor(nn.Module):
 
 
 class Critic(nn.Module):
-    def __init__(self, image_size=32, hidden_dim=128, n_layers=3, num_heads=8):
+    def __init__(self, image_size=32, hidden_dim=128, n_layers=3, num_heads=4):
         super(Critic, self).__init__()
 
         self.image_size = image_size
