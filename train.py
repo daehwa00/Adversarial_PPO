@@ -259,7 +259,7 @@ class Train:
             )
 
     def plot_and_save(self):
-        fig, axs = plt.subplots(2, 2, figsize=(12, 10))  # 서브플롯의 크기를 늘림
+        fig, axs = plt.subplots(2, 2, figsize=(12, 10))
         axs[0, 0].plot(self.steps_history, label="Average Steps")
         axs[0, 0].set_title("Average Steps")
         axs[0, 1].plot(self.rewards_history, label="Running Reward")
@@ -272,10 +272,9 @@ class Train:
         for ax in axs.flat:
             ax.set(xlabel="Iteration", ylabel="Value")
             ax.label_outer()
-            if ax.has_data():
-                ax.legend()
+            ax.legend(loc="best")
 
-        fig.subplots_adjust(hspace=3, wspace=3)  # 서브플롯 간격 조절
-        plt.tight_layout()
+        fig.subplots_adjust(hspace=0.1, wspace=0.1)
+
         plt.savefig(f"results/results_graphs.png")
         plt.close()
