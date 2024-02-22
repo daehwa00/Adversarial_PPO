@@ -48,15 +48,15 @@ class Actor(nn.Module):
         # Projections for feature extractors
         self.projection_1 = nn.Sequential(
             nn.Conv2d(
-                32, hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
+                32, hidden_dim * 4, kernel_size=self.patch_size, stride=self.patch_size
             ),
-            Rearrange("b c h w -> b (h w) c"),
+            Rearrange("b (n c) h w -> b (n h w) c", n=4),
         )
         self.projection_2 = nn.Sequential(
             nn.Conv2d(
-                64, hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
+                64, hidden_dim * 16, kernel_size=self.patch_size, stride=self.patch_size
             ),
-            Rearrange("b c h w -> b (h w) c"),
+            Rearrange("b (n c) h w -> b (n h w) c", n=16),
         )
 
         self.position_embedding = nn.Parameter(
@@ -92,14 +92,17 @@ class Actor(nn.Module):
             0
         ).expand(batch_size, -1, -1)
         features_1 = self.feature_extractor_1(features)
-        patches_1 = self.projection_1(features_1) + self.position_embedding_1.unsqueeze(
-            0
-        ).expand(batch_size, -1, -1)
+        patches_1 = self.projection_1(features_1)
+        pos_emb_1 = self.position_embedding_1.unsqueeze(0).repeat(4, 1, 1).view(64, 128)
+        pos_emb_1 = pos_emb_1.unsqueeze(0).expand(batch_size, -1, -1)
+        patches_1 = patches_1 + pos_emb_1
         features_2 = self.feature_extractor_2(features_1)
-        patches_2 = self.projection_2(features_2) + self.position_embedding_2.unsqueeze(
-            0
-        ).expand(batch_size, -1, -1)
-
+        patches_2 = self.projection_2(features_2)
+        pos_emb_2 = (
+            self.position_embedding_2.unsqueeze(0).repeat(16, 1, 1).view(64, 128)
+        )
+        pos_emb_2 = pos_emb_2.unsqueeze(0).expand(batch_size, -1, -1)
+        patches_2 = patches_2 + pos_emb_2
         # Combine all patch embeddings
         patch_embeddings = torch.cat([patches, patches_1, patches_2], dim=1).permute(
             1, 0, 2
