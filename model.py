@@ -322,17 +322,3 @@ class ResidualBlock(nn.Module):
         out += self.shortcut(x)
         out = F.relu(out)
         return out
-
-
-def initialize_weights(module):
-    if isinstance(module, nn.Linear):
-        nn.init.xavier_normal_(module.weight)
-        nn.init.constant_(module.bias, 0)
-    elif isinstance(module, nn.Conv2d):
-        nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
-        if module.bias is not None:
-            nn.init.constant_(module.bias, 0)
-    elif isinstance(module, nn.MultiheadAttention):
-        for param in module.parameters():
-            if param.dim() > 1:
-                nn.init.xavier_uniform_(param)
