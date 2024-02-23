@@ -24,37 +24,41 @@ class Actor(nn.Module):
             torch.randn(image_size**2 + 1, hidden_dim)
         )
 
-        self.projection = nn.Sequential(
-            nn.Conv2d(
-                3, self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
-            ),
-            Rearrange("b c h w -> b (h w) c"),
-        )
         # Positional embeddings for different feature map sizes
-        self.position_embedding = nn.Parameter(
+        self.position_embedding_1 = nn.Parameter(
             torch.randn(self.num_patches, hidden_dim)
         )
-        self.position_embedding_1 = nn.Parameter(
+        self.position_embedding_2 = nn.Parameter(
             torch.randn(self.num_patches // 4, hidden_dim)
         )
-        self.position_embedding_2 = nn.Parameter(
+        self.position_embedding_3 = nn.Parameter(
             torch.randn(self.num_patches // 16, hidden_dim)
         )
 
         # Feature extractors
-        self.feature_extractor_1 = ResidualBlock(3, 32, stride=2)
-        self.feature_extractor_2 = ResidualBlock(32, 64, stride=2)
+        self.feature_extractor_1 = ResidualBlock(3, 64, stride=1)
+        self.feature_extractor_2 = ResidualBlock(64, 128, stride=2)
+        self.feature_extractor_3 = ResidualBlock(128, 256, stride=2)
 
-        # Projections for feature extractors
         self.projection_1 = nn.Sequential(
             nn.Conv2d(
-                32, hidden_dim * 4, kernel_size=self.patch_size, stride=self.patch_size
+                64, self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
+            ),
+            Rearrange("b c h w -> b (h w) c"),
+        )
+        # Projections for feature extractors
+        self.projection_2 = nn.Sequential(
+            nn.Conv2d(
+                128, hidden_dim * 4, kernel_size=self.patch_size, stride=self.patch_size
             ),
             Rearrange("b (n c) h w -> b (n h w) c", n=4),
         )
-        self.projection_2 = nn.Sequential(
+        self.projection_3 = nn.Sequential(
             nn.Conv2d(
-                64, hidden_dim * 16, kernel_size=self.patch_size, stride=self.patch_size
+                256,
+                hidden_dim * 16,
+                kernel_size=self.patch_size,
+                stride=self.patch_size,
             ),
             Rearrange("b (n c) h w -> b (n h w) c", n=16),
         )
@@ -87,24 +91,33 @@ class Actor(nn.Module):
 
         action_map_emb = action_map_emb.permute(1, 0, 2)
 
-        # Process input features through projection and feature extractors
-        patches = self.projection(features) + self.position_embedding.unsqueeze(
-            0
-        ).expand(batch_size, -1, -1)
+        # patch 1
         features_1 = self.feature_extractor_1(features)
         patches_1 = self.projection_1(features_1)
-        pos_emb_1 = self.position_embedding_1.unsqueeze(0).repeat(4, 1, 1).view(64, 128)
-        pos_emb_1 = pos_emb_1.unsqueeze(0).expand(batch_size, -1, -1)
+        pos_emb_1 = self.position_embedding_1.unsqueeze(0).expand(batch_size, -1, -1)
         patches_1 = patches_1 + pos_emb_1
+        # patch 2
         features_2 = self.feature_extractor_2(features_1)
         patches_2 = self.projection_2(features_2)
         pos_emb_2 = (
-            self.position_embedding_2.unsqueeze(0).repeat(16, 1, 1).view(64, 128)
+            self.position_embedding_2.unsqueeze(0)
+            .repeat(4, 1, 1)
+            .view(64, self.hidden_dim)
         )
         pos_emb_2 = pos_emb_2.unsqueeze(0).expand(batch_size, -1, -1)
         patches_2 = patches_2 + pos_emb_2
+        # patch 3
+        features_3 = self.feature_extractor_3(features_2)
+        patches_3 = self.projection_3(features_3)
+        pos_emb_3 = (
+            self.position_embedding_3.unsqueeze(0)
+            .repeat(16, 1, 1)
+            .view(64, self.hidden_dim)
+        )
+        pos_emb_3 = pos_emb_3.unsqueeze(0).expand(batch_size, -1, -1)
+        patches_3 = patches_3 + pos_emb_3
         # Combine all patch embeddings
-        patch_embeddings = torch.cat([patches, patches_1, patches_2], dim=1).permute(
+        patch_embeddings = torch.cat([patches_1, patches_2, patches_3], dim=1).permute(
             1, 0, 2
         )
 
@@ -169,39 +182,43 @@ class Critic(nn.Module):
             torch.randn(image_size**2 + 1, hidden_dim)
         )
 
-        self.projection = nn.Sequential(
-            nn.Conv2d(
-                3, self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
-            ),
-            Rearrange("b c h w -> b (h w) c"),
-        )
         # Positional embeddings for different feature map sizes
-        self.position_embedding = nn.Parameter(
+        self.position_embedding_1 = nn.Parameter(
             torch.randn(self.num_patches, hidden_dim)
         )
-        self.position_embedding_1 = nn.Parameter(
+        self.position_embedding_2 = nn.Parameter(
             torch.randn(self.num_patches // 4, hidden_dim)
         )
-        self.position_embedding_2 = nn.Parameter(
+        self.position_embedding_3 = nn.Parameter(
             torch.randn(self.num_patches // 16, hidden_dim)
         )
 
         # Feature extractors
-        self.feature_extractor_1 = ResidualBlock(3, 32, stride=2)
-        self.feature_extractor_2 = ResidualBlock(32, 64, stride=2)
+        self.feature_extractor_1 = ResidualBlock(3, 64, stride=1)
+        self.feature_extractor_2 = ResidualBlock(64, 128, stride=2)
+        self.feature_extractor_3 = ResidualBlock(128, 256, stride=2)
 
-        # Projections for feature extractors
         self.projection_1 = nn.Sequential(
             nn.Conv2d(
-                32, hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
+                64, self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
             ),
             Rearrange("b c h w -> b (h w) c"),
         )
+        # Projections for feature extractors
         self.projection_2 = nn.Sequential(
             nn.Conv2d(
-                64, hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
+                128, hidden_dim * 4, kernel_size=self.patch_size, stride=self.patch_size
             ),
-            Rearrange("b c h w -> b (h w) c"),
+            Rearrange("b (n c) h w -> b (n h w) c", n=4),
+        )
+        self.projection_3 = nn.Sequential(
+            nn.Conv2d(
+                256,
+                hidden_dim * 16,
+                kernel_size=self.patch_size,
+                stride=self.patch_size,
+            ),
+            Rearrange("b (n c) h w -> b (n h w) c", n=16),
         )
 
         self.position_embedding = nn.Parameter(
@@ -231,21 +248,33 @@ class Critic(nn.Module):
 
         action_map_emb = action_map_emb.permute(1, 0, 2)
 
-        # Process input features through projection and feature extractors
-        patches = self.projection(features) + self.position_embedding.unsqueeze(
-            0
-        ).expand(batch_size, -1, -1)
+        # patch 1
         features_1 = self.feature_extractor_1(features)
-        patches_1 = self.projection_1(features_1) + self.position_embedding_1.unsqueeze(
-            0
-        ).expand(batch_size, -1, -1)
+        patches_1 = self.projection_1(features_1)
+        pos_emb_1 = self.position_embedding_1.unsqueeze(0).expand(batch_size, -1, -1)
+        patches_1 = patches_1 + pos_emb_1
+        # patch 2
         features_2 = self.feature_extractor_2(features_1)
-        patches_2 = self.projection_2(features_2) + self.position_embedding_2.unsqueeze(
-            0
-        ).expand(batch_size, -1, -1)
-
+        patches_2 = self.projection_2(features_2)
+        pos_emb_2 = (
+            self.position_embedding_2.unsqueeze(0)
+            .repeat(4, 1, 1)
+            .view(64, self.hidden_dim)
+        )
+        pos_emb_2 = pos_emb_2.unsqueeze(0).expand(batch_size, -1, -1)
+        patches_2 = patches_2 + pos_emb_2
+        # patch 3
+        features_3 = self.feature_extractor_3(features_2)
+        patches_3 = self.projection_3(features_3)
+        pos_emb_3 = (
+            self.position_embedding_3.unsqueeze(0)
+            .repeat(16, 1, 1)
+            .view(64, self.hidden_dim)
+        )
+        pos_emb_3 = pos_emb_3.unsqueeze(0).expand(batch_size, -1, -1)
+        patches_3 = patches_3 + pos_emb_3
         # Combine all patch embeddings
-        patch_embeddings = torch.cat([patches, patches_1, patches_2], dim=1).permute(
+        patch_embeddings = torch.cat([patches_1, patches_2, patches_3], dim=1).permute(
             1, 0, 2
         )
 
