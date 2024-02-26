@@ -9,23 +9,22 @@ from utils import set_random_seed
 ENV_NAME = "AdversarialRL"
 
 
-lr = 1e-3
+lr = 1e-4
 epochs = 10
 clip_range = 0.2
-mini_batch_size = 512
+mini_batch_size = 200
 num_heads = 4
 T = 64  # Horizon
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-env_batch = 256
+env_batch = 200
 hidden_dim = 128
 action_map_size = [3, 32, 32]
-n_layers = 3
+n_layers = 4
 warmup_steps = 200
 n_iterations = warmup_steps * 10
-
 # Reward weights
-alpha = 1.0
+alpha = 0
 beta = 5.0
 gamma = 0.03
 

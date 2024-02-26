@@ -66,9 +66,11 @@ class Agent:
                 * (
                     1.0
                     + torch.cos(
-                        math.pi
-                        * (current_step - self.warmup_steps)
-                        / (self.n_iter - self.warmup_steps)
+                        torch.pi
+                        * torch.tensor(
+                            (current_step - self.warmup_steps)
+                            / (self.n_iter - self.warmup_steps)
+                        ),
                     )
                 ),
             )
@@ -88,6 +90,7 @@ class Agent:
     def schedule_lr(self, actor_loss, critic_loss):
         self.actor_scheduler.step()
         self.critic_scheduler.step()
+        pass
 
     def save_weights(self, iteration, state_rms):
         torch.save(
