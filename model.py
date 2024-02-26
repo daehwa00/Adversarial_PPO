@@ -5,7 +5,31 @@ from torch.distributions import normal
 
 from einops.layers.torch import Rearrange
 
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=3,
+            stride=stride,
+            padding=1,
+            bias=False,
+        )
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(
+            out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False
+        )
+        self.bn2 = nn.BatchNorm2d(out_channels)
 
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=stride, bias=False
+                ),
+                nn.BatchNorm2d(out_channels),
+            )
 class Actor(nn.Module):
     def __init__(
         self, n_actions, image_size=32, hidden_dim=128, n_layers=3, num_heads=4
@@ -27,6 +51,13 @@ class Actor(nn.Module):
         # Positional embeddings for different feature map sizes
         self.position_embedding_1 = nn.Parameter(
             torch.randn(self.num_patches, hidden_dim)
+        )
+        self.feature_extractors = nn.ModuleList(
+            [
+                ResidualBlock(3, 64, stride=1),
+                ResidualBlock(64, 128, stride=2),
+                ResidualBlock(128, 256, stride=2),
+            ]
         )
         self.position_embedding_2 = nn.Parameter(
             torch.randn(self.num_patches // 4, hidden_dim)
@@ -65,6 +96,46 @@ class Actor(nn.Module):
 
         self.position_embedding = nn.Parameter(
             torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
+        )
+
+        self.position_embeddings = nn.ParameterList(
+            [
+                nn.Parameter(torch.randn(self.num_patches, hidden_dim)),
+                nn.Parameter(torch.randn(self.num_patches // 4, hidden_dim)),
+                nn.Parameter(torch.randn(self.num_patches // 16, hidden_dim)),
+            ]
+        )
+
+        self.projections = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv2d(
+                        64,
+                        self.hidden_dim,
+                        kernel_size=self.patch_size,
+                        stride=self.patch_size,
+                    ),
+                    Rearrange("b c h w -> b (h w) c"),
+                ),
+                nn.Sequential(
+                    nn.Conv2d(
+                        128,
+                        hidden_dim * 4,
+                        kernel_size=self.patch_size,
+                        stride=self.patch_size,
+                    ),
+                    Rearrange("b (n c) h w -> b (n h w) c", n=4),
+                ),
+                nn.Sequential(
+                    nn.Conv2d(
+                        256,
+                        hidden_dim * 16,
+                        kernel_size=self.patch_size,
+                        stride=self.patch_size,
+                    ),
+                    Rearrange("b (n c) h w -> b (n h w) c", n=16),
+                ),
+            ]
         )
 
         self.cross_attention_layers = nn.ModuleList(
@@ -116,10 +187,25 @@ class Actor(nn.Module):
         )
         pos_emb_3 = pos_emb_3.unsqueeze(0).expand(batch_size, -1, -1)
         patches_3 = patches_3 + pos_emb_3
+        patch_list = []
+        for extractor, projection, pos_emb, i in zip(
+            self.feature_extractors,
+            self.projections,
+            self.position_embeddings,
+            [1, 4, 16],
+        ):
+            features = extractor(features)
+            patches = projection(features)
+            pos_emb = pos_emb.unsqueeze(0).repeat(i, 1, 1).view(64, self.hidden_dim)
+            pos_emb = pos_emb.unsqueeze(0).expand(batch_size, -1, -1)
+            patches = patches + pos_emb
+            patch_list.append(patches)
+
         # Combine all patch embeddings
         patch_embeddings = torch.cat([patches_1, patches_2, patches_3], dim=1).permute(
             1, 0, 2
         )
+        patch_embeddings = torch.cat(patch_list, dim=1).permute(1, 0, 2)
 
         for layer_norm, attn_layer in zip(
             self.layer_norms, self.cross_attention_layers
@@ -139,31 +225,30 @@ class Actor(nn.Module):
         return dist
 
     def _init_weights(self):
-        # Initialize linear layers using Xavier initialization
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                nn.init.constant_(m.bias, 0)
-
-            # Initialize convolutional layers using Kaiming initialization
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-
-            # Initialize parameters for multi-head attention layers
+            elif isinstance(m, nn.LayerNorm):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.MultiheadAttention):
-                for param in m.parameters():
-                    if param.dim() > 1:
-                        nn.init.xavier_uniform_(param)
+                nn.init.xavier_uniform_(m.in_proj_weight)
+                nn.init.constant_(m.in_proj_bias, 0)
+                nn.init.constant_(m.out_proj.bias, 0)
+                nn.init.xavier_uniform_(m.out_proj.weight)
 
-        # Initialize embeddings and other parameters with a normal distribution
-        nn.init.normal_(self.cls_token, mean=0.0, std=0.02)
-        nn.init.normal_(self.action_map_positional_embedding, mean=0.0, std=0.02)
-        nn.init.normal_(self.position_embedding, mean=0.0, std=0.02)
-        nn.init.normal_(self.position_embedding_1, mean=0.0, std=0.02)
-        nn.init.normal_(self.position_embedding_2, mean=0.0, std=0.02)
-        nn.init.normal_(self.log_std, mean=0.0, std=0.02)
+        # Special initializations for specific parameters
+        nn.init.normal_(self.cls_token, std=0.02)
+        nn.init.normal_(self.action_map_positional_embedding, std=0.02)
+        for pos_emb in self.position_embeddings:
+            nn.init.normal_(pos_emb, std=0.02)
+        nn.init.normal_(self.log_std, mean=0, std=0.1)
 
 
 class Critic(nn.Module):
@@ -185,6 +270,13 @@ class Critic(nn.Module):
         # Positional embeddings for different feature map sizes
         self.position_embedding_1 = nn.Parameter(
             torch.randn(self.num_patches, hidden_dim)
+        )
+        self.feature_extractors = nn.ModuleList(
+            [
+                ResidualBlock(3, 64, stride=1),
+                ResidualBlock(64, 128, stride=2),
+                ResidualBlock(128, 256, stride=2),
+            ]
         )
         self.position_embedding_2 = nn.Parameter(
             torch.randn(self.num_patches // 4, hidden_dim)
@@ -223,6 +315,45 @@ class Critic(nn.Module):
 
         self.position_embedding = nn.Parameter(
             torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
+        )
+        self.position_embeddings = nn.ParameterList(
+            [
+                nn.Parameter(torch.randn(self.num_patches, hidden_dim)),
+                nn.Parameter(torch.randn(self.num_patches // 4, hidden_dim)),
+                nn.Parameter(torch.randn(self.num_patches // 16, hidden_dim)),
+            ]
+        )
+
+        self.projections = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv2d(
+                        64,
+                        self.hidden_dim,
+                        kernel_size=self.patch_size,
+                        stride=self.patch_size,
+                    ),
+                    Rearrange("b c h w -> b (h w) c"),
+                ),
+                nn.Sequential(
+                    nn.Conv2d(
+                        128,
+                        hidden_dim * 4,
+                        kernel_size=self.patch_size,
+                        stride=self.patch_size,
+                    ),
+                    Rearrange("b (n c) h w -> b (n h w) c", n=4),
+                ),
+                nn.Sequential(
+                    nn.Conv2d(
+                        256,
+                        hidden_dim * 16,
+                        kernel_size=self.patch_size,
+                        stride=self.patch_size,
+                    ),
+                    Rearrange("b (n c) h w -> b (n h w) c", n=16),
+                ),
+            ]
         )
 
         self.cross_attention_layers = nn.ModuleList(
@@ -273,10 +404,25 @@ class Critic(nn.Module):
         )
         pos_emb_3 = pos_emb_3.unsqueeze(0).expand(batch_size, -1, -1)
         patches_3 = patches_3 + pos_emb_3
+        patch_list = []
+        for extractor, projection, pos_emb, i in zip(
+            self.feature_extractors,
+            self.projections,
+            self.position_embeddings,
+            [1, 4, 16],
+        ):
+            features = extractor(features)
+            patches = projection(features)
+            pos_emb = pos_emb.unsqueeze(0).repeat(i, 1, 1).view(64, self.hidden_dim)
+            pos_emb = pos_emb.unsqueeze(0).expand(batch_size, -1, -1)
+            patches = patches + pos_emb
+            patch_list.append(patches)
+
         # Combine all patch embeddings
         patch_embeddings = torch.cat([patches_1, patches_2, patches_3], dim=1).permute(
             1, 0, 2
         )
+        patch_embeddings = torch.cat(patch_list, dim=1).permute(1, 0, 2)
 
         for layer_norm, attn_layer in zip(
             self.layer_norms, self.cross_attention_layers
@@ -293,30 +439,29 @@ class Critic(nn.Module):
         return value
 
     def _init_weights(self):
-        # Initialize linear layers using Xavier initialization
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                nn.init.constant_(m.bias, 0)
-
-            # Initialize convolutional layers using Kaiming initialization
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
-
-            # Initialize parameters for multi-head attention layers
+            elif isinstance(m, nn.LayerNorm):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.MultiheadAttention):
-                for param in m.parameters():
-                    if param.dim() > 1:
-                        nn.init.xavier_uniform_(param)
+                nn.init.xavier_uniform_(m.in_proj_weight)
+                nn.init.constant_(m.in_proj_bias, 0)
+                nn.init.constant_(m.out_proj.bias, 0)
+                nn.init.xavier_uniform_(m.out_proj.weight)
 
-        # Initialize embeddings and other parameters with a normal distribution
-        nn.init.normal_(self.cls_token, mean=0.0, std=0.02)
-        nn.init.normal_(self.action_map_positional_embedding, mean=0.0, std=0.02)
-        nn.init.normal_(self.position_embedding, mean=0.0, std=0.02)
-        nn.init.normal_(self.position_embedding_1, mean=0.0, std=0.02)
-        nn.init.normal_(self.position_embedding_2, mean=0.0, std=0.02)
+        # Special initializations for specific parameters
+        nn.init.normal_(self.cls_token, std=0.02)
+        nn.init.normal_(self.action_map_positional_embedding, std=0.02)
+        for pos_emb in self.position_embeddings:
+            nn.init.normal_(pos_emb, std=0.02)
 
 
 class ResidualBlock(nn.Module):

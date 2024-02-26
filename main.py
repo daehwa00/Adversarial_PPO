@@ -1,7 +1,6 @@
 from agent import Agent
 import torch
 from classifier import load_model_and_filtered_loader
-from autoencoder import load_pretrained_autoencoder
 from environment import make_env
 from train import Train
 from utils import set_random_seed
@@ -13,6 +12,7 @@ lr = 1e-4
 epochs = 10
 clip_range = 0.2
 mini_batch_size = 200
+mini_batch_size = 128
 num_heads = 4
 T = 64  # Horizon
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
