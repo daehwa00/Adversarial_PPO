@@ -13,12 +13,12 @@ epochs = 10
 clip_range = 0.2
 mini_batch_size = 200
 mini_batch_size = 128
-num_heads = 4
+num_heads = 8
 T = 64  # Horizon
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 env_batch = 200
-hidden_dim = 128
+hidden_dim = 512
 action_map_size = [3, 32, 32]
 n_layers = 4
 warmup_steps = 200
