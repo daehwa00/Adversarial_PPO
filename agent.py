@@ -3,7 +3,6 @@ from model import Actor, Critic
 import torch
 from torch.optim import Adam
 from torch.optim.lr_scheduler import LambdaLR
-import math
 
 
 class Agent:

@@ -3,20 +3,20 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import normal
 
-from einops.layers.torch import Rearrange
+from classifier import ResNet18
 
 
 class Actor(nn.Module):
     def __init__(
-        self, n_actions, image_size=32, hidden_dim=128, n_layers=3, num_heads=4
+        self, n_actions, image_size=32, hidden_dim=512, n_layers=4, num_heads=8
     ):
         super(Actor, self).__init__()
         self.image_size = image_size
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
-        self.patch_size = 4
-        self.num_patches = (image_size // self.patch_size) ** 2
         self.n_actions = n_actions
+        self.patch_size = 8
+        self.num_patches = (image_size // self.patch_size) ** 2
 
         self.action_map_fc = nn.Linear(3, hidden_dim)
         self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
@@ -24,94 +24,9 @@ class Actor(nn.Module):
             torch.randn(image_size**2 + 1, hidden_dim)
         )
 
-        # Positional embeddings for different feature map sizes
-        self.position_embedding_1 = nn.Parameter(
-            torch.randn(self.num_patches, hidden_dim)
-        )
-        self.feature_extractors = nn.ModuleList(
-            [
-                ResidualBlock(3, 64, stride=1),
-                ResidualBlock(64, 128, stride=2),
-                ResidualBlock(128, 256, stride=2),
-            ]
-        )
-        self.position_embedding_2 = nn.Parameter(
-            torch.randn(self.num_patches // 4, hidden_dim)
-        )
-        self.position_embedding_3 = nn.Parameter(
-            torch.randn(self.num_patches // 16, hidden_dim)
-        )
-
-        # Feature extractors
-        self.feature_extractor_1 = ResidualBlock(3, 64, stride=1)
-        self.feature_extractor_2 = ResidualBlock(64, 128, stride=2)
-        self.feature_extractor_3 = ResidualBlock(128, 256, stride=2)
-
-        self.projection_1 = nn.Sequential(
-            nn.Conv2d(
-                64, self.hidden_dim, kernel_size=self.patch_size, stride=self.patch_size
-            ),
-            Rearrange("b c h w -> b (h w) c"),
-        )
-        # Projections for feature extractors
-        self.projection_2 = nn.Sequential(
-            nn.Conv2d(
-                128, hidden_dim * 4, kernel_size=self.patch_size, stride=self.patch_size
-            ),
-            Rearrange("b (n c) h w -> b (n h w) c", n=4),
-        )
-        self.projection_3 = nn.Sequential(
-            nn.Conv2d(
-                256,
-                hidden_dim * 16,
-                kernel_size=self.patch_size,
-                stride=self.patch_size,
-            ),
-            Rearrange("b (n c) h w -> b (n h w) c", n=16),
-        )
-
+        self.patch_resnet = PatchResNet()
         self.position_embedding = nn.Parameter(
             torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
-        )
-
-        self.position_embeddings = nn.ParameterList(
-            [
-                nn.Parameter(torch.randn(self.num_patches, hidden_dim)),
-                nn.Parameter(torch.randn(self.num_patches // 4, hidden_dim)),
-                nn.Parameter(torch.randn(self.num_patches // 16, hidden_dim)),
-            ]
-        )
-
-        self.projections = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Conv2d(
-                        64,
-                        self.hidden_dim,
-                        kernel_size=self.patch_size,
-                        stride=self.patch_size,
-                    ),
-                    Rearrange("b c h w -> b (h w) c"),
-                ),
-                nn.Sequential(
-                    nn.Conv2d(
-                        128,
-                        hidden_dim * 4,
-                        kernel_size=self.patch_size,
-                        stride=self.patch_size,
-                    ),
-                    Rearrange("b (n c) h w -> b (n h w) c", n=4),
-                ),
-                nn.Sequential(
-                    nn.Conv2d(
-                        256,
-                        hidden_dim * 16,
-                        kernel_size=self.patch_size,
-                        stride=self.patch_size,
-                    ),
-                    Rearrange("b (n c) h w -> b (n h w) c", n=16),
-                ),
-            ]
         )
 
         self.cross_attention_layers = nn.ModuleList(
@@ -136,63 +51,23 @@ class Actor(nn.Module):
             [cls_tokens, action_map_emb], dim=1
         ) + self.action_map_positional_embedding.unsqueeze(0).expand(batch_size, -1, -1)
 
-        action_map_emb = action_map_emb.permute(1, 0, 2)
+        action_map_emb = action_map_emb.permute(1, 0, 2)  # (seq, batch, feature)
 
-        # patch 1
-        features_1 = self.feature_extractor_1(features)
-        patches_1 = self.projection_1(features_1)
-        pos_emb_1 = self.position_embedding_1.unsqueeze(0).expand(batch_size, -1, -1)
-        patches_1 = patches_1 + pos_emb_1
-        # patch 2
-        features_2 = self.feature_extractor_2(features_1)
-        patches_2 = self.projection_2(features_2)
-        pos_emb_2 = (
-            self.position_embedding_2.unsqueeze(0)
-            .repeat(4, 1, 1)
-            .view(64, self.hidden_dim)
+        patches = self.patch_resnet(features)  # (batch, patches, feature)
+        patches = patches + self.position_embedding.unsqueeze(0).expand(
+            batch_size, -1, -1
         )
-        pos_emb_2 = pos_emb_2.unsqueeze(0).expand(batch_size, -1, -1)
-        patches_2 = patches_2 + pos_emb_2
-        # patch 3
-        features_3 = self.feature_extractor_3(features_2)
-        patches_3 = self.projection_3(features_3)
-        pos_emb_3 = (
-            self.position_embedding_3.unsqueeze(0)
-            .repeat(16, 1, 1)
-            .view(64, self.hidden_dim)
-        )
-        pos_emb_3 = pos_emb_3.unsqueeze(0).expand(batch_size, -1, -1)
-        patches_3 = patches_3 + pos_emb_3
-        patch_list = []
-        for extractor, projection, pos_emb, i in zip(
-            self.feature_extractors,
-            self.projections,
-            self.position_embeddings,
-            [1, 4, 16],
-        ):
-            features = extractor(features)
-            patches = projection(features)
-            pos_emb = pos_emb.unsqueeze(0).repeat(i, 1, 1).view(64, self.hidden_dim)
-            pos_emb = pos_emb.unsqueeze(0).expand(batch_size, -1, -1)
-            patches = patches + pos_emb
-            patch_list.append(patches)
-
-        # Combine all patch embeddings
-        patch_embeddings = torch.cat([patches_1, patches_2, patches_3], dim=1).permute(
-            1, 0, 2
-        )
-        patch_embeddings = torch.cat(patch_list, dim=1).permute(1, 0, 2)
+        patches = patches.permute(1, 0, 2)  # (seq, batch, feature)
 
         for layer_norm, attn_layer in zip(
             self.layer_norms, self.cross_attention_layers
         ):
             action_map_emb = layer_norm(action_map_emb)
-            attn_output, _ = attn_layer(
-                action_map_emb, patch_embeddings, patch_embeddings
-            )
+            attn_output, _ = attn_layer(action_map_emb, patches, patches)
             action_map_emb = action_map_emb + attn_output
 
         cls_token_output = action_map_emb[0, :, :]
+
         mu = self.mu(cls_token_output)
         std = torch.exp(self.log_std + 1e-5)
 
@@ -222,15 +97,13 @@ class Actor(nn.Module):
         # Special initializations for specific parameters
         nn.init.normal_(self.cls_token, std=0.02)
         nn.init.normal_(self.action_map_positional_embedding, std=0.02)
-        for pos_emb in self.position_embeddings:
-            nn.init.normal_(pos_emb, std=0.02)
+        nn.init.normal_(self.position_embedding, std=0.02)
         nn.init.normal_(self.log_std, mean=0, std=0.1)
 
 
 class Critic(nn.Module):
-    def __init__(self, image_size=32, hidden_dim=512, n_layers=3, num_heads=8):
+    def __init__(self, image_size=32, hidden_dim=512, n_layers=4, num_heads=8):
         super(Critic, self).__init__()
-
         self.image_size = image_size
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
@@ -269,12 +142,13 @@ class Critic(nn.Module):
             [cls_tokens, action_map_emb], dim=1
         ) + self.action_map_positional_embedding.unsqueeze(0).expand(batch_size, -1, -1)
 
-        action_map_emb = action_map_emb.permute(1, 0, 2)
+        action_map_emb = action_map_emb.permute(1, 0, 2)  # (seq, batch, feature)
 
-        patches = self.patch_resnet(features)
+        patches = self.patch_resnet(features)  # (batch, patches, feature)
         patches = patches + self.position_embedding.unsqueeze(0).expand(
             batch_size, -1, -1
         )
+        patches = patches.permute(1, 0, 2)  # (seq, batch, feature)
 
         for layer_norm, attn_layer in zip(
             self.layer_norms, self.cross_attention_layers
@@ -310,13 +184,13 @@ class Critic(nn.Module):
         # Special initializations for specific parameters
         nn.init.normal_(self.cls_token, std=0.02)
         nn.init.normal_(self.action_map_positional_embedding, std=0.02)
-        for pos_emb in self.position_embeddings:
-            nn.init.normal_(pos_emb, std=0.02)
+        nn.init.normal_(self.position_embedding, std=0.02)
 
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super(ResidualBlock, self).__init__()
+        self.expansion = 1
         self.conv1 = nn.Conv2d(
             in_channels,
             out_channels,
@@ -340,6 +214,13 @@ class ResidualBlock(nn.Module):
                 nn.BatchNorm2d(out_channels),
             )
 
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out
+
 
 class PatchResNet(nn.Module):
     def __init__(self, block=ResidualBlock, patch_size=8, num_blocks=[2, 2, 2, 2]):
@@ -358,10 +239,11 @@ class PatchResNet(nn.Module):
         layers = []
         for stride in strides:
             layers.append(block(self.in_planes, planes, stride))
-            self.in_planes = planes * block.expansion
+            self.in_planes = planes
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        B, C, H, W = x.size()
         # 이미지를 패치로 나눔
         patches = x.unfold(2, self.patch_size, self.patch_size).unfold(
             3, self.patch_size, self.patch_size
@@ -385,13 +267,7 @@ class PatchResNet(nn.Module):
 
         # 결과 재구성
         # (B*Patches), C, H, W -> B, Patches, C, H, W
-        out = patch_outputs.view(
-            -1,
-            x.size(0),
-            patch_outputs.size(1),
-            patch_outputs.size(2),
-            patch_outputs.size(3),
-        )
+        out = patch_outputs.view(B, 16, -1)
         # B, Patches, C, H, W -> B, Patches, C*H*W (여기서는 예시로 C*H*W로 변환, 필요에 따라 조정 가능)
 
         return out
