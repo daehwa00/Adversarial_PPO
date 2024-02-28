@@ -3,8 +3,6 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import normal
 
-from classifier import ResNet18
-
 
 class Actor(nn.Module):
     def __init__(
@@ -36,8 +34,11 @@ class Actor(nn.Module):
             [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
         )
 
+        self.critic_fc = nn.Linear(hidden_dim * 2, hidden_dim)
         self.mu = nn.Linear(in_features=hidden_dim, out_features=n_actions)
         self.log_std = nn.Parameter(torch.zeros(1, self.n_actions))
+
+        self.resnet = ResNet(ResidualBlock, [2, 2, 2, 2])
 
         self._init_weights()
 
@@ -68,7 +69,15 @@ class Actor(nn.Module):
 
         cls_token_output = action_map_emb[0, :, :]
 
-        mu = self.mu(cls_token_output)
+        res_features = self.resnet(features)
+
+        combined_features = torch.cat([cls_token_output, res_features], dim=1)
+
+        combined_features = F.relu(
+            self.critic_fc(combined_features)
+        )  # 중간 활성화 함수 추가
+
+        mu = self.mu(combined_features)
         std = torch.exp(self.log_std + 1e-5)
 
         dist = normal.Normal(mu, std)
@@ -128,7 +137,9 @@ class Critic(nn.Module):
             [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
         )
 
+        self.value_fc = nn.Linear(hidden_dim * 2, hidden_dim)
         self.value_head = nn.Linear(hidden_dim, 1)
+        self.resnet = ResNet(ResidualBlock, [2, 2, 2, 2])
 
         self._init_weights()
 
@@ -158,7 +169,11 @@ class Critic(nn.Module):
             action_map_emb = action_map_emb + attn_output
 
         cls_token_output = action_map_emb[0, :, :]
-        value = self.value_head(cls_token_output)
+        res_features = self.resnet(features)
+
+        combined_features = torch.cat([cls_token_output, res_features], dim=1)
+        value = F.relu(self.value_fc(combined_features))  # 중간 활성화 함수 추가
+        value = self.value_head(value)
 
         return value
 
@@ -270,4 +285,35 @@ class PatchResNet(nn.Module):
         out = patch_outputs.view(B, 16, -1)
         # B, Patches, C, H, W -> B, Patches, C*H*W (여기서는 예시로 C*H*W로 변환, 필요에 따라 조정 가능)
 
+        return out
+
+
+class ResNet(nn.Module):
+    def __init__(self, block, num_blocks):
+        super(ResNet, self).__init__()
+        self.in_planes = 64
+
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
+        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
+
+    def _make_layer(self, block, planes, num_blocks, stride):
+        strides = [stride] + [1] * (num_blocks - 1)
+        layers = []
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride))
+            self.in_planes = planes
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        out = self.layer4(out)
+        out = F.avg_pool2d(out, 4)
+        out = out.view(out.size(0), -1)
         return out
