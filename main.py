@@ -25,7 +25,7 @@ n_iterations = warmup_steps * 10
 
 # Reward weights
 alpha = 0
-beta = 5.0
+beta = 10.0
 gamma = 0.03
 
 if __name__ == "__main__":
