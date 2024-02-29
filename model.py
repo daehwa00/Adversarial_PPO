@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import normal
 
-from classifier import ResNet18
+from classifier import FeatureResNet18
 
 
 class Actor(nn.Module):
@@ -16,7 +16,7 @@ class Actor(nn.Module):
         self.n_layers = n_layers
         self.n_actions = n_actions
         self.patch_size = 8
-        self.num_patches = (image_size // self.patch_size) ** 2
+        self.num_patches = 7**2
 
         self.action_map_fc = nn.Linear(3, hidden_dim)
         self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
@@ -26,7 +26,7 @@ class Actor(nn.Module):
 
         self.patch_resnet = PatchResNet()
         self.position_embedding = nn.Parameter(
-            torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
+            torch.randn(self.num_patches, hidden_dim)
         )
 
         self.cross_attention_layers = nn.ModuleList(
@@ -108,7 +108,7 @@ class Critic(nn.Module):
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
         self.patch_size = 8
-        self.num_patches = (image_size // self.patch_size) ** 2
+        self.num_patches = 7**2
 
         self.action_map_fc = nn.Linear(3, hidden_dim)
         self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_dim))
@@ -118,7 +118,7 @@ class Critic(nn.Module):
 
         self.patch_resnet = PatchResNet()
         self.position_embedding = nn.Parameter(
-            torch.randn((image_size // self.patch_size) ** 2, hidden_dim)
+            torch.randn(self.num_patches, hidden_dim)
         )
 
         self.cross_attention_layers = nn.ModuleList(
@@ -127,8 +127,9 @@ class Critic(nn.Module):
         self.layer_norms = nn.ModuleList(
             [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
         )
+        self.feature_ResNet = FeatureResNet18()
 
-        self.value_head = nn.Linear(hidden_dim, 1)
+        self.value_head = nn.Linear(hidden_dim * 2, 1)
 
         self._init_weights()
 
@@ -158,7 +159,11 @@ class Critic(nn.Module):
             action_map_emb = action_map_emb + attn_output
 
         cls_token_output = action_map_emb[0, :, :]
-        value = self.value_head(cls_token_output)
+        features = self.feature_ResNet(features)
+
+        combined = torch.cat([cls_token_output, features], dim=1)
+
+        value = self.value_head(combined)
 
         return value
 
@@ -226,6 +231,7 @@ class PatchResNet(nn.Module):
     def __init__(self, block=ResidualBlock, patch_size=8, num_blocks=[2, 2, 2, 2]):
         super(PatchResNet, self).__init__()
         self.patch_size = patch_size
+        self.patch_stride = self.patch_size // 2
         self.in_planes = 3
 
         self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
@@ -245,13 +251,11 @@ class PatchResNet(nn.Module):
     def forward(self, x):
         B, C, H, W = x.size()
         # 이미지를 패치로 나눔
-        patches = x.unfold(2, self.patch_size, self.patch_size).unfold(
-            3, self.patch_size, self.patch_size
+        patches = x.unfold(2, self.patch_size, self.patch_stride).unfold(
+            3, self.patch_size, self.patch_stride
         )
         # B, C, H, W -> B, C, Patches, Patch_size, Patch_size
-        patches = patches.contiguous().view(
-            x.size(0), x.size(1), -1, self.patch_size, self.patch_size
-        )
+        patches = patches.contiguous().view(B, C, -1, self.patch_size, self.patch_size)
         # B, C, Patches, Patch_size, Patch_size -> (B*Patches), C, Patch_size, Patch_size
         patches = (
             patches.permute(2, 0, 1, 3, 4)
@@ -267,7 +271,7 @@ class PatchResNet(nn.Module):
 
         # 결과 재구성
         # (B*Patches), C, H, W -> B, Patches, C, H, W
-        out = patch_outputs.view(B, 16, -1)
+        out = patch_outputs.view(B, 49, -1)
         # B, Patches, C, H, W -> B, Patches, C*H*W (여기서는 예시로 C*H*W로 변환, 필요에 따라 조정 가능)
 
         return out
