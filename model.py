@@ -36,7 +36,6 @@ class Actor(nn.Module):
             [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
         )
 
-        self.critic_fc = nn.Linear(hidden_dim * 2, hidden_dim)
         self.mu = nn.Linear(in_features=hidden_dim, out_features=n_actions)
         self.log_std = nn.Parameter(torch.zeros(1, self.n_actions))
 
@@ -109,6 +108,7 @@ class Critic(nn.Module):
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
         self.patch_size = 8
+        self.patch_stride = self.patch_size // 2
         self.num_patches = 7**2
 
         self.action_map_fc = nn.Linear(3, hidden_dim)
