@@ -40,8 +40,6 @@ class Actor(nn.Module):
         self.mu = nn.Linear(in_features=hidden_dim, out_features=n_actions)
         self.log_std = nn.Parameter(torch.zeros(1, self.n_actions))
 
-        self.resnet = ResNet(ResidualBlock, [2, 2, 2, 2])
-
         self._init_weights()
 
     def forward(self, features, action_map):
@@ -71,15 +69,7 @@ class Actor(nn.Module):
 
         cls_token_output = action_map_emb[0, :, :]
 
-        res_features = self.resnet(features)
-
-        combined_features = torch.cat([cls_token_output, res_features], dim=1)
-
-        combined_features = F.relu(
-            self.critic_fc(combined_features)
-        )  # 중간 활성화 함수 추가
-
-        mu = self.mu(combined_features)
+        mu = self.mu(cls_token_output)
         std = torch.exp(self.log_std + 1e-5)
 
         dist = normal.Normal(mu, std)
