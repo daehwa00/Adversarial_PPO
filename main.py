@@ -11,12 +11,12 @@ ENV_NAME = "AdversarialRL"
 lr = 1e-4
 epochs = 10
 clip_range = 0.2
-mini_batch_size = 64
+mini_batch_size = 50
 num_heads = 8
 T = 64  # Horizon
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-env_batch = 64
+env_batch = 16
 hidden_dim = 512
 action_map_size = [3, 32, 32]
 n_layers = 4

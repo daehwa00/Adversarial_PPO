@@ -1,7 +1,7 @@
 import torch
 import matplotlib.pyplot as plt
 from tensormanager import TensorManager
-from utils import save_image
+from utils import save_image, overlay_actions_on_state
 import time
 
 
@@ -160,14 +160,21 @@ class Train:
             # Save the last state as an image
             if iteration % 1 == 0:
                 for i in range(self.env_num):
-                    if done_times[i] != -1:
-                        state_to_save = tensor_manager.states_tensor[i, done_times[i] :]
+                    if dones[i]:
+                        state_to_save = tensor_manager.states_tensor[
+                            i, done_times[i], :
+                        ]
+                        action_to_save = (
+                            tensor_manager.action_maps_tensor[i, done_times[i], :] * 255
+                        )
+                        state_to_save = overlay_actions_on_state(
+                            state_to_save, action_to_save
+                        )
                         dir_path = f"saved_images/{start_time}/iteration_{iteration}"
                         filepath = f"{dir_path}/env_{i}.png"
                         # Save the state as an image
                         save_image(state_to_save, filepath)
 
-            # 데이터 수집 단계 종료
             tensor_manager.filter_with_done_times(done_times)
 
             for i in range(self.env_num):
