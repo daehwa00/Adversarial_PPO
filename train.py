@@ -175,10 +175,6 @@ class Train:
                         # Save the state as an image
                         save_image(state_to_save, filepath)
 
-                        tmp = torch.sum(action_to_save != 0)
-                        if tmp > 64 * 3:
-                            print("error")
-
             tensor_manager.filter_with_done_times(done_times)
 
             for i in range(self.env_num):
