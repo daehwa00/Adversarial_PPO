@@ -42,20 +42,25 @@ def ensure_dir(path):
 
 def overlay_actions_on_state(state, action):
     """
-    Overlay actions on the state using a single operation.
-    Non-zero values in action replace corresponding values in state.
+    Overlay normalized actions on the state using a single operation.
+    Actions are normalized from [-1, 1] to [0, 1], and non-zero values replace corresponding values in state.
 
     Parameters:
     - state: A tensor representing the state.
-    - action: A tensor with the same shape as state, where non-zero values are actions to be overlaid.
+    - action: A tensor with the same shape as state, where values in [-1, 1] represent actions to be overlaid.
 
     Returns:
-    - A new tensor where the state is modified by overlaying action values.
+    - A new tensor where the state is modified by overlaying normalized action values.
     """
-    # Create a mask of non-zero (action) values
-    action_mask = action != 0
+    # Normalize action values from [-1, 1] to [0, 1]
+    normalized_action = (action + 1) / 2
 
-    # Use the mask to select where to overlay action values onto the state
-    state[action_mask] = action[action_mask]
+    # Create a mask of non-zero (action) values after normalization
+    action_mask = (
+        normalized_action != 0.5
+    )  # 0.5 corresponds to the original action value of 0
+
+    # Use the mask to select where to overlay normalized action values onto the state
+    state[action_mask] = normalized_action[action_mask]
 
     return state
