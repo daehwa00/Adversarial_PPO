@@ -38,3 +38,24 @@ def save_image(tensor, filepath):
 def ensure_dir(path):
     """Ensure that a directory exists; if not, create it."""
     os.makedirs(path, exist_ok=True)
+
+
+def overlay_actions_on_state(state, action):
+    """
+    Overlay actions on the state using a single operation.
+    Non-zero values in action replace corresponding values in state.
+
+    Parameters:
+    - state: A tensor representing the state.
+    - action: A tensor with the same shape as state, where non-zero values are actions to be overlaid.
+
+    Returns:
+    - A new tensor where the state is modified by overlaying action values.
+    """
+    # Create a mask of non-zero (action) values
+    action_mask = action != 0
+
+    # Use the mask to select where to overlay action values onto the state
+    state[action_mask] = action[action_mask]
+
+    return state
