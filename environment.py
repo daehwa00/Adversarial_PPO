@@ -46,6 +46,9 @@ class Env:
         self.previous_prediction = self.original_prediction
         self.original_class = torch.argmax(self.original_prediction, dim=1)
         self.actions_taken = 0
+        self.action_map = torch.zeros(
+            (self.env_batch, 3, 32, 32), dtype=torch.float32, device=self.device
+        )
 
         return self.current_state
 

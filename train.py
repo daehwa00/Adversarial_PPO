@@ -158,9 +158,9 @@ class Train:
                 prev_action_map = action_map
 
             # Save the last state as an image
-            if iteration % 100 == 0:
+            if iteration % 1 == 0:
                 for i in range(self.env_num):
-                    if dones[i]:
+                    if dones[i] and done_times[i] != 64:
                         state_to_save = tensor_manager.states_tensor[
                             i, done_times[i], :
                         ]
@@ -174,6 +174,10 @@ class Train:
                         filepath = f"{dir_path}/env_{i}.png"
                         # Save the state as an image
                         save_image(state_to_save, filepath)
+
+                        tmp = torch.sum(action_to_save != 0)
+                        if tmp > 64 * 3:
+                            print("error")
 
             tensor_manager.filter_with_done_times(done_times)
 
