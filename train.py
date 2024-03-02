@@ -158,7 +158,7 @@ class Train:
                 prev_action_map = action_map
 
             # Save the last state as an image
-            if iteration % 1 == 0:
+            if iteration % 100 == 0:
                 for i in range(self.env_num):
                     if dones[i]:
                         state_to_save = tensor_manager.states_tensor[
