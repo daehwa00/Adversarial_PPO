@@ -4,6 +4,9 @@ data/
 pre-trained-models/
 .vscode/
 results/
+saved_images/
+
+main.py
 
 *.ipynb
 *.png   

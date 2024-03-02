@@ -1,6 +1,8 @@
 import torch
 import matplotlib.pyplot as plt
 from tensormanager import TensorManager
+from utils import save_image
+import time
 
 
 class Train:
@@ -108,6 +110,7 @@ class Train:
         return actor_loss, critic_loss
 
     def step(self):
+        start_time = time.strftime("%Y-%m-%d_%H-%M-%S")
         for iteration in range(1, 1 + self.n_iterations):
             # Initialize the environment
             done_times = [-1] * self.env_num
@@ -154,11 +157,20 @@ class Train:
 
                 prev_action_map = action_map
 
+            # Save the last state as an image
+            if iteration % 1 == 0:
+                for i in range(self.env_num):
+                    if done_times[i] != -1:
+                        state_to_save = tensor_manager.states_tensor[i, done_times[i] :]
+                        dir_path = f"saved_images/{start_time}/iteration_{iteration}"
+                        filepath = f"{dir_path}/env_{i}.png"
+                        # Save the state as an image
+                        save_image(state_to_save, filepath)
+
             # 데이터 수집 단계 종료
             tensor_manager.filter_with_done_times(done_times)
 
             for i in range(self.env_num):
-                # if the epsisode is not done
                 if done_times[i] == -1:
                     next_value = self.agent.get_value(
                         tensor_manager.states_tensor[i, -1].unsqueeze(0),
