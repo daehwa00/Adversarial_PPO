@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import normal
 
-from classifier import ResNet18
+from classifier import FeatureResNet18
 
 
 class Actor(nn.Module):
@@ -35,6 +35,9 @@ class Actor(nn.Module):
         self.layer_norms = nn.ModuleList(
             [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
         )
+        self.feature_resnet = FeatureResNet18()
+
+        self.actor_fc = nn.Linear(hidden_dim * 2, hidden_dim)
 
         self.mu = nn.Linear(in_features=hidden_dim, out_features=n_actions)
         self.log_std = nn.Parameter(torch.zeros(1, self.n_actions))
@@ -67,7 +70,11 @@ class Actor(nn.Module):
             action_map_emb = action_map_emb + attn_output
 
         cls_token_output = action_map_emb[0, :, :]
+        features = self.feature_resnet(features)
 
+        # Concatenate the cls token and the features
+        cls_token_output = torch.cat([cls_token_output, features], dim=1)
+        cls_token_output = torch.relu(self.actor_fc(cls_token_output))
         mu = self.mu(cls_token_output)
         std = torch.exp(self.log_std + 1e-5)
 
@@ -128,7 +135,9 @@ class Critic(nn.Module):
         self.layer_norms = nn.ModuleList(
             [nn.LayerNorm(hidden_dim) for _ in range(n_layers)]
         )
+        self.feature_resnet = FeatureResNet18()
 
+        self.actor_fc = nn.Linear(hidden_dim * 2, hidden_dim)
         self.value_head = nn.Linear(hidden_dim, 1)
 
         self._init_weights()
@@ -159,6 +168,12 @@ class Critic(nn.Module):
             action_map_emb = action_map_emb + attn_output
 
         cls_token_output = action_map_emb[0, :, :]
+
+        features = self.feature_resnet(features)
+
+        # Concatenate the cls token and the features
+        cls_token_output = torch.cat([cls_token_output, features], dim=1)
+        cls_token_output = torch.relu(self.actor_fc(cls_token_output))
 
         value = self.value_head(cls_token_output)
 
