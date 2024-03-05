@@ -3,7 +3,6 @@ from model import Actor, Critic
 import torch
 from torch.optim import Adam
 from torch.optim.lr_scheduler import LambdaLR
-import math
 
 
 class Agent:
@@ -90,7 +89,6 @@ class Agent:
     def schedule_lr(self, actor_loss, critic_loss):
         self.actor_scheduler.step()
         self.critic_scheduler.step()
-        pass
 
     def save_weights(self, iteration, state_rms):
         torch.save(
