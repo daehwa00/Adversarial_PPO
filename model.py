@@ -67,11 +67,6 @@ class Actor(nn.Module):
             action_map_emb = action_map_emb + attn_output
 
         cls_token_output = action_map_emb[0, :, :]
-        features = self.feature_resnet(features)
-
-        # Concatenate the cls token and the features
-        cls_token_output = torch.cat([cls_token_output, features], dim=1)
-        cls_token_output = torch.relu(self.actor_fc(cls_token_output))
         mu = self.mu(cls_token_output)
         std = torch.exp(self.log_std + 1e-5)
 

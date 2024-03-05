@@ -89,7 +89,6 @@ class Agent:
     def schedule_lr(self, actor_loss, critic_loss):
         self.actor_scheduler.step()
         self.critic_scheduler.step()
-        pass
 
     def save_weights(self, iteration, state_rms):
         torch.save(
