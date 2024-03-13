@@ -21,8 +21,6 @@ transform = transforms.Compose(
 )
 
 dataset = datasets.ImageFolder("path/to/imagenet/validation", transform=transform)
-dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
-
 
 # CIFAR10 클래스
 classes = (
