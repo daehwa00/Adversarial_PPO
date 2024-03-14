@@ -4,6 +4,7 @@ from classifier import load_model_and_filtered_loader
 from environment import make_env
 from train import Train
 from utils import set_random_seed
+from datasets import load_dataset
 
 ENV_NAME = "AdversarialRL"
 

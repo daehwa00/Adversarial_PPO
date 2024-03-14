@@ -3,8 +3,6 @@ from torch import nn
 import torch.nn.functional as F
 from torch.distributions import normal
 
-from classifier import FeatureResNet18
-
 
 class Actor(nn.Module):
     def __init__(

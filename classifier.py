@@ -9,7 +9,6 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
 import os
-from collections import OrderedDict
 
 
 # Load CIFAR10 dataset
@@ -20,7 +19,10 @@ transform = transforms.Compose(
     ]
 )
 
-dataset = datasets.ImageFolder("path/to/imagenet/validation", transform=transform)
+train_path = "./data/ImageNet/"
+dataset = torchvision.datasets.ImageFolder(train_path, transform=transform)
+
+print(train_path)
 
 # CIFAR10 클래스
 classes = (
@@ -82,7 +84,7 @@ def load_model_and_filtered_loader(device, env_batch):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # 모델 로딩과 초기화
-    model = models.ResNeXt101_32X8D_Weights(pretrained=True)
+    model = models.resnext101_32x8d(pretrained=True)
     # 데이터셋으로부터 DataLoader 생성
     loader = DataLoader(dataset, batch_size=env_batch, shuffle=True, num_workers=4)
 
